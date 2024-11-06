@@ -73,45 +73,125 @@ By performing file deduplication first using `dedupe.py`, you can expedite the a
    - The script will automatically detect and process all valid files in the input directory.
    - It creates an `output` directory to store the generated reports and visualizations.
 
-## Workflow
+## Detailed Workflow
 
-The DSUA script follows these key steps to analyze the data:
+The DSUA script performs a comprehensive analysis of Trend Micro Deep Security module usage. Below is a step-by-step walkthrough of the entire process, detailing the logic behind each decision to facilitate auditing.
 
-1. **Initialization:**
-   - Sets up the input and output directories.
-   - Checks for valid input files to process.
+### 1. Data Collection
 
-2. **Data Loading and Preprocessing:**
-   - Loads data from all valid files in the input directory.
-   - Standardizes column names and handles date parsing.
-   - Combines data into a single DataFrame.
-   - Removes duplicate entries to ensure data integrity.
+- **Input Directory Scanning:**
+  - The script scans a specified input directory for data files.
+  - **Valid File Types:** Only files with extensions `.csv`, `.xlsx`, or `.xls` are considered to ensure compatibility.
+- **File Handling:**
+  - Each valid file is read and loaded into a data structure for processing.
+  - **Error Handling:** Files that cannot be read (due to corruption or unsupported formats) are logged and skipped.
 
-3. **Environment Classification:**
-   - Classifies each hostname into environments (e.g., Production, Development) based on predefined patterns.
-   - Unknown environments are flagged for further analysis.
+### 2. File Deduplication (Optional but Recommended)
 
-4. **Metric Calculation:**
-   - Calculates usage metrics across different environments and modules.
-   - Determines active and inactive instances.
-   - Computes module usage percentages and identifies the most common modules.
-   - Generates correlation matrices for module usage.
+- **Purpose:** To eliminate duplicate files that may contain redundant data.
+- **Method:**
+  - Calculates the SHA-256 hash for each file in the input directory.
+  - Compares hash values to identify identical files.
+- **Outcome:**
+  - Duplicate files are removed, reducing processing time and avoiding duplicate data entries.
 
-5. **Enhanced Metrics and Trends:**
-   - Calculates enhanced metrics such as maximum concurrent instances and utilization hours.
-   - Analyzes monthly trends and patterns in module usage.
+### 3. Data Merging and Entry Deduplication
 
-6. **Visualization:**
-   - Generates visualizations like bar charts and pie charts to represent module usage and environment distribution.
-   - Saves visualizations in the `output` directory.
+- **Data Concatenation:**
+  - All individual data files are merged into a single dataset.
+- **Entry Deduplication Logic:**
+  - **Criteria:** Duplicate rows are identified based on a unique combination of key columns (e.g., hostname, IP address).
+  - **Process:**
+    - Sorts the data to group potential duplicates together.
+    - Uses a defined key to compare rows and remove duplicates.
+- **Standardization:**
+  - Data fields are standardized (e.g., trimming whitespace, standardizing case) to ensure consistent comparison.
 
-7. **Report Generation:**
-   - Compiles all metrics and visualizations into a comprehensive HTML report.
-   - Highlights key findings and provides an accessible summary of the analysis.
+### 4. Environment Classification
 
-8. **Output:**
-   - Saves the HTML report, metrics JSON, and processed data CSV in the `output` directory.
-   - Provides console output summarizing the analysis process and results.
+- **Objective:** To categorize entries into environments like Production, Development, etc.
+- **Logic:**
+  - **Hostname and IP Analysis:**
+    - Hostnames and IP addresses are matched against predefined patterns for each environment.
+  - **Patterns Used:**
+    - **Production:** Keywords like `prod`, `production`, patterns like `prd\d+`.
+    - **Development:** Keywords like `dev`, `development`, patterns like `dev\d+`.
+    - **Other Environments:** Similar patterns for Test, Staging, DR, UAT, Integration.
+  - **Domain Patterns:**
+    - Recognizes internal domains (e.g., `.internal`, `.local`) and DMZ configurations.
+- **Assignment:**
+  - Each entry is assigned an environment tag based on the first matching pattern.
+  - **Unclassified Entries:**
+    - Entries that do not match any pattern are labeled as `Unknown`.
+
+### 5. Module Usage Analysis
+
+- **Modules Analyzed:**
+  - Anti-Malware (AM), Web Reputation Service (WRS), Deep Packet Inspection (DPI), Firewall (FW), etc.
+- **Usage Calculation:**
+  - **Binary Indicators:**
+    - Each module usage is represented as a binary value (e.g., `1` for enabled, `0` for disabled).
+  - **Aggregation:**
+    - Totals are calculated by summing the binary values across all entries.
+- **Percentage Utilization:**
+  - **Formula:**
+    - Percentage for each module = (Total Enabled Instances / Total Instances) * 100%
+  - **Environment-Specific Metrics:**
+    - Calculations are performed separately for each environment to provide granular insights.
+
+### 6. Reporting and Visualization
+
+- **Metric Generation:**
+  - Key statistics are compiled, such as total number of instances per environment, module usage counts, and percentages.
+- **Visualization:**
+  - Graphs and charts are created to visually represent module usage across environments.
+  - **Tools Used:**
+    - Visualization libraries (e.g., Matplotlib, Seaborn) generate bar charts, pie charts, etc.
+- **HTML Report Creation:**
+  - **Template Rendering:**
+    - An HTML template is populated with the calculated metrics and visualizations.
+  - **Report Contents:**
+    - Summary of findings.
+    - Interactive charts and graphs.
+    - Detailed tables with drill-down capability.
+- **Output:**
+  - The final report is saved as `deep_security_usage_report.html` for easy sharing and review.
+
+### 7. Logging and Audit Trail
+
+- **Logging Mechanism:**
+  - The script maintains detailed logs of its operations.
+  - **Levels:**
+    - **INFO:** General process updates.
+    - **DEBUG:** Detailed information useful for diagnosing issues.
+    - **ERROR:** Records any errors encountered during execution.
+- **Log Files:**
+  - Logs are written to 
+
+security_analysis.log
+
+, providing a time-stamped record of the script's activities.
+- **Purpose for Auditing:**
+  - Enables auditors to trace the script's execution flow.
+  - Assists in verifying that all steps were performed correctly.
+
+### 8. Error Handling and Validation
+
+- **Data Validation:**
+  - Checks for missing or inconsistent data in critical fields.
+  - **Actions:**
+    - Invalid entries are logged and excluded from analysis.
+- **Exception Handling:**
+  - The script captures and logs exceptions without terminating unexpectedly.
+  - Provides informative messages to facilitate troubleshooting.
+
+### 9. Configuration and Customization
+
+- **Adjustable Parameters:**
+  - **Environment Patterns:** Can be modified to match specific naming conventions.
+  - **Module Definitions:** Ability to update which modules are analyzed.
+- **Usage Instructions:**
+  - Parameters can be set via command-line arguments or a configuration file.
 
 ## Output
 
