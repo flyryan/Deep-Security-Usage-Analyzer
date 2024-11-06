@@ -294,7 +294,3 @@ After running DSUA, the following outputs are generated in the `output` director
 ## Contributing
 
 Contributions to improve DSUA are welcome. Please submit a pull request or open an issue on GitHub with your suggestions.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
