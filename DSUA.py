@@ -24,6 +24,16 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 import re  # Add this import at the top of the file if not already present
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TimeElapsedColumn,
+    BarColumn,
+    TaskProgressColumn,
+    TextColumn
+)
+from rich.console import Console
+from rich.panel import Panel
 
 # Custom logging formatter with colors and symbols
 class ColoredFormatter(logging.Formatter):
@@ -50,7 +60,7 @@ class ColoredFormatter(logging.Formatter):
         return logging.Formatter(self.format_str).format(record)
 
 # Create console handler with custom formatter
-console_handler = logging.StreamHandler(sys.stdout)
+console_handler = logging.StreamHandler(sys.stderr)  # Changed from sys.stdout to sys.stderr
 console_handler.setFormatter(ColoredFormatter())
 console_handler.setLevel(logging.INFO)  # Only show INFO and above in console
 
@@ -61,11 +71,13 @@ file_handler.setFormatter(logging.Formatter(
 ))
 file_handler.setLevel(logging.DEBUG)  # Log everything to file
 
-# Set up logger
+# Set up logger without attaching to rich's Console to prevent conflicts
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
+
+console = Console()
 
 class SecurityModuleAnalyzer:
     """
@@ -429,11 +441,6 @@ class SecurityModuleAnalyzer:
         Returns:
             str: The classified environment name.
         """
-        if pd.isna(hostname):
-            return 'Unknown'
-            
-        hostname = str(hostname).lower()
-        
         # Suppress the specific warning about regex pattern groups
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', category=UserWarning, 
@@ -451,67 +458,71 @@ class SecurityModuleAnalyzer:
                        for pattern in patterns):
                     return domain
         
-        # Additional classification based on naming conventions
-        if any(x in hostname for x in ['app', 'api', 'web', 'srv']):
-            if 'prod' in hostname or 'prd' in hostname:
-                return 'Production'
-            elif 'dev' in hostname:
-                return 'Development'
+            # Additional classification based on naming conventions
+            if any(x in hostname for x in ['app', 'api', 'web', 'srv']):
+                if 'prod' in hostname or 'prd' in hostname:
+                    return 'Production'
+                elif 'dev' in hostname:
+                    return 'Development'
         
-        # Try to extract environment from hostname structure
-        parts = hostname.split('.')
-        if len(parts) > 1:
-            for part in parts:
-                if any(env.lower() in part for env in self.ENVIRONMENT_PATTERNS.keys()):
-                    return next(env for env in self.ENVIRONMENT_PATTERNS.keys() 
-                              if env.lower() in part)
+            # Try to extract environment from hostname structure
+            parts = hostname.split('.')
+            if len(parts) > 1:
+                for part in parts:
+                    if any(env.lower() in part for env in self.ENVIRONMENT_PATTERNS.keys()):
+                        return next(env for env in self.ENVIRONMENT_PATTERNS.keys() 
+                                  if env.lower() in part)
         
-        # Check for numbered environments
-        if any(pattern in hostname for pattern in ['env1', 'env2', 'e1', 'e2']):
-            return 'Environment-Specific'
+            # Check for numbered environments
+            if any(pattern in hostname for pattern in ['env1', 'env2', 'e1', 'e2']):
+                return 'Environment-Specific'
         
-        return 'Unknown'
+            result = 'Unknown'
+            logger.debug(f"Classified environment: {result}")
+            return result
 
-    def load_and_preprocess_data(self) -> pd.DataFrame:
+    def load_and_preprocess_data(self, progress, parent_task) -> pd.DataFrame:
         """
         Load data from files in the specified directory and preprocess it for analysis.
-
-        Returns:
-            pd.DataFrame: The combined and cleaned data.
         """
         files = [f for f in self.directory.glob('*') if f.suffix in self.VALID_EXTENSIONS]
         if not files:
             raise ValueError(f"No valid files found in {self.directory}")
         
-        print(f"\nFound {len(files)} files to process")
         dfs = []
         
-        # Suppress date parsing warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            
-            for i, file in enumerate(files, 1):
-                try:
-                    print(f"\rProcessing file {i}/{len(files)}: {file.name}" + " " * 50, end='')
-                    
-                    if file.suffix == '.csv':
-                        df = pd.read_csv(file)
-                    else:
-                        df = pd.read_excel(file)
-                    
-                    # Standardize column names and handle dates
-                    df.columns = df.columns.str.strip()
-                    if 'Start' in df.columns:
-                        df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
-                    if 'Stop' in df.columns:
-                        df['Stop'] = pd.to_datetime(df['Stop'], errors='coerce')
-                    
-                    dfs.append(df)
-                    
-                except Exception as e:
-                    print(f"\n⚠️  Error processing {file.name}: {str(e)}")
+        # Create a subtask for file processing
+        file_task = progress.add_task(
+            "[cyan]Processing files...",
+            total=len(files),
+            visible=True
+        )
         
-        print("\n\nCombining and cleaning data...")
+        for file in files:
+            try:
+                # Update the description to show current file
+                progress.update(file_task, description=f"[cyan]Processing {file.name}...")
+                
+                if file.suffix == '.csv':
+                    df = pd.read_csv(file)
+                else:
+                    df = pd.read_excel(file)
+                
+                # Standardize column names and handle dates
+                df.columns = df.columns.str.strip()
+                if 'Start' in df.columns:
+                    df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
+                if 'Stop' in df.columns:
+                    df['Stop'] = pd.to_datetime(df['Stop'], errors='coerce')
+                
+                dfs.append(df)
+                progress.update(file_task, advance=1)
+                progress.update(parent_task, completed=int((len(dfs) / len(files)) * 100))
+                
+            except Exception as e:
+                console.print(f"[red]Error processing {file.name}: {str(e)}[/red]")
+        
+        progress.update(parent_task, description="[cyan]Combining and cleaning data...")
         combined_df = pd.concat(dfs, ignore_index=True)
         
         # Remove duplicates
@@ -519,19 +530,13 @@ class SecurityModuleAnalyzer:
         combined_df = combined_df.drop_duplicates()
         if original_len > len(combined_df):
             removed = original_len - len(combined_df)
-            print(f"✓ Removed {removed:,} duplicate rows ({(removed/original_len)*100:.1f}%)")
+            progress.update(parent_task, description=f"[green]Removed {removed:,} duplicate rows")
         
-        print(f"✓ Final dataset: {len(combined_df):,} records from {len(combined_df['Hostname'].unique()):,} unique hosts")
-        
+        progress.remove_task(file_task)
         return combined_df
 
-    def calculate_monthly_metrics(self) -> Dict:
-        """
-        Calculate monthly metrics to identify trends and data gaps.
-
-        Returns:
-            Dict: A dictionary containing monthly metrics and data gaps.
-        """
+    def calculate_monthly_metrics(self, progress, parent_task) -> Dict:
+        """Calculate monthly metrics to identify trends and data gaps."""
         monthly_metrics = {
             'data': [],
             'data_gaps': [],
@@ -539,9 +544,17 @@ class SecurityModuleAnalyzer:
             'date_range': ''
         }
         
+        # Create task for datetime processing
+        datetime_task = progress.add_task(
+            "[cyan]Processing datetime data...",
+            total=100,
+            visible=True
+        )
+        
         try:
             # Handle different date column formats
             if 'Start Date' in self.data.columns and 'Start Time' in self.data.columns:
+                progress.update(datetime_task, description="[cyan]Converting date and time columns...")
                 self.data['start_datetime'] = pd.to_datetime(
                     self.data['Start Date'].astype(str) + ' ' + 
                     self.data['Start Time'].astype(str),
@@ -549,62 +562,78 @@ class SecurityModuleAnalyzer:
                     errors='coerce'
                 )
             elif 'Start' in self.data.columns:
+                progress.update(datetime_task, description="[cyan]Converting start datetime...")
                 self.data['start_datetime'] = pd.to_datetime(self.data['Start'], errors='coerce')
+            
+            progress.update(datetime_task, advance=50)
             
             if not 'start_datetime' in self.data.columns or self.data['start_datetime'].isna().all():
                 logger.warning("No valid date information found")
+                progress.remove_task(datetime_task)
                 return monthly_metrics
             
-            # Get date range
+            # Calculate date range
             min_date = self.data['start_datetime'].min()
             max_date = self.data['start_datetime'].max()
             monthly_metrics['date_range'] = f"{min_date.strftime('%Y-%m')} to {max_date.strftime('%Y-%m')}"
             
-            # Generate all months between min and max date
+            progress.update(datetime_task, advance=25)
+            
+            # Generate months and track data
             all_months = pd.date_range(
                 start=min_date.replace(day=1),
                 end=max_date.replace(day=1),
                 freq='MS'
             ).to_period('M')
             
-            # Group by month
             self.data['month'] = self.data['start_datetime'].dt.to_period('M')
             months_with_data = set(self.data['month'].unique())
+            
+            progress.update(datetime_task, advance=25)
+            progress.remove_task(datetime_task)
+            
+            # Create task for monthly calculations
+            months_task = progress.add_task(
+                "[cyan]Processing monthly data...",
+                total=len(months_with_data),
+                visible=True
+            )
+            
+            # Calculate monthly metrics
+            monthly_data = []
+            for month in months_with_data:
+                progress.update(months_task, description=f"[cyan]Processing {month}...")
+                month_data = self.data[self.data['month'] == month]
+                
+                monthly_data.append({
+                    'month': str(month),
+                    'active_instances': len(month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique()),
+                    'max_concurrent': self._calculate_max_concurrent(month_data),
+                    'avg_modules_per_host': month_data[self.MODULE_COLUMNS].sum(axis=1).mean(),
+                    'total_hours': (month_data['Duration (Seconds)'].sum() / 3600) 
+                        if 'Duration (Seconds)' in month_data.columns else 0
+                })
+                progress.update(months_task, advance=1)
             
             # Track data gaps
             for month in all_months:
                 if month not in months_with_data:
                     monthly_metrics['data_gaps'].append(month.strftime('%Y-%m'))
             
-            # Calculate metrics for each month
-            monthly_data = []
-            for month in months_with_data:
-                month_data = self.data[self.data['month'] == month]
-                
-                # Calculate metrics for the month
-                active_instances = len(month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
-                
-                # Calculate maximum concurrent for the month
-                max_concurrent = self._calculate_max_concurrent(month_data)
-                
-                data = {
-                    'month': str(month),
-                    'active_instances': active_instances,
-                    'max_concurrent': max_concurrent,
-                    'avg_modules_per_host': month_data[self.MODULE_COLUMNS].sum(axis=1).mean(),
-                    'total_hours': (month_data['Duration (Seconds)'].sum() / 3600) if 'Duration (Seconds)' in month_data.columns else 0
-                }
-                monthly_data.append(data)
-            
-            # Sort monthly data by month string (should be in YYYY-MM format)
             monthly_metrics['data'] = sorted(monthly_data, key=lambda x: x['month'], reverse=True)
             monthly_metrics['total_months'] = len(monthly_data)
             
-            return monthly_metrics
+            progress.remove_task(months_task)
+            progress.update(parent_task, advance=20)
             
         except Exception as e:
             logger.warning(f"Error calculating monthly metrics: {str(e)}")
-            return monthly_metrics
+            if 'datetime_task' in locals():
+                progress.remove_task(datetime_task)
+            if 'months_task' in locals():
+                progress.remove_task(months_task)
+        
+        return monthly_metrics
 
     def _calculate_max_concurrent(self, df: pd.DataFrame) -> int:
         """Helper method to calculate maximum concurrent instances."""
@@ -628,29 +657,32 @@ class SecurityModuleAnalyzer:
         
         return max_concurrent
 
-    def calculate_metrics(self) -> Dict:
-        """
-        Calculate usage metrics across different environments and modules.
-
-        Returns:
-            Dict: A dictionary containing metrics and statistics.
-        """
+    def calculate_metrics(self, progress, parent_task) -> Dict:
+        """Calculate usage metrics across different environments and modules."""
         if self.data is None:
             raise ValueError("No data loaded for analysis")
         
-        print("\nClassifying environments and calculating metrics...")
-        total_records = len(self.data)
+        # Create subtask for environment classification
+        env_task = progress.add_task(
+            "[cyan]Classifying environments...",
+            total=len(self.data),
+            visible=True
+        )
         
-        # Add environment classification with progress tracking
         def classify_with_progress(hostname):
-            classify_with_progress.count += 1
-            if classify_with_progress.count % 9 == 0:
-                progress = (classify_with_progress.count / total_records) * 100
-                print(f"\rProgress: {progress:.1f}% ({classify_with_progress.count:,}/{total_records:,} records)", end='')
+            progress.update(env_task, advance=1)
             return self.classify_environment(hostname)
         
-        classify_with_progress.count = 0
+        # Apply classification
         self.data['Environment'] = self.data['Hostname'].apply(classify_with_progress)
+        progress.remove_task(env_task)
+        
+        # Create subtask for metrics calculation
+        metrics_task = progress.add_task(
+            "[cyan]Calculating environment metrics...",
+            total=100,
+            visible=True
+        )
         
         metrics = {
             'by_environment': {},
@@ -659,19 +691,22 @@ class SecurityModuleAnalyzer:
         }
         
         # Calculate module status and hours
+        progress.update(metrics_task, description="[cyan]Calculating module status...")
         self.data['has_modules'] = self.data[self.MODULE_COLUMNS].sum(axis=1) > 0
+        progress.update(metrics_task, advance=20)
         
-        # Calculate hours for active and inactive instances
+        # Calculate hours
+        progress.update(metrics_task, description="[cyan]Calculating utilization hours...")
         if 'Duration (Seconds)' in self.data.columns:
             active_hours = (self.data[self.data['has_modules']]['Duration (Seconds)'].sum()) / 3600
             inactive_hours = (self.data[~self.data['has_modules']]['Duration (Seconds)'].sum()) / 3600
             total_hours = active_hours + inactive_hours
         else:
-            active_hours = 0
-            inactive_hours = 0
-            total_hours = 0
+            active_hours = inactive_hours = total_hours = 0
+        progress.update(metrics_task, advance=20)
         
-        # Calculate overall metrics first
+        # Calculate overall metrics
+        progress.update(metrics_task, description="[cyan]Calculating overall metrics...")
         total_instances = len(self.data['Hostname'].unique())
         active_instances = len(self.data[self.data['has_modules']]['Hostname'].unique())
         inactive_instances = total_instances - active_instances
@@ -684,16 +719,25 @@ class SecurityModuleAnalyzer:
             'active_hours': active_hours,
             'inactive_hours': inactive_hours
         })
+        progress.update(metrics_task, advance=20)
         
-        # Calculate correlation matrix first
+        # Calculate correlation matrix
+        progress.update(metrics_task, description="[cyan]Calculating correlation matrix...")
         correlation_matrix = self.data[self.MODULE_COLUMNS].corr()
         metrics['overall']['correlation_matrix'] = correlation_matrix.to_dict()
+        progress.update(metrics_task, advance=20)
         
-        # Calculate metrics for each environment
+        # Calculate environment-specific metrics
+        progress.update(metrics_task, description="[cyan]Calculating environment-specific metrics...")
         environments = sorted(self.data['Environment'].unique())
-        print(f"\nCalculating metrics for {len(environments)} environments...")
+        env_subtask = progress.add_task(
+            "[yellow]Processing environments...",
+            total=len(environments),
+            visible=True
+        )
         
         for env in environments:
+            progress.update(env_subtask, description=f"[yellow]Processing {env} environment...")
             env_df = self.data[self.data['Environment'] == env]
             active_instances = env_df[env_df[self.MODULE_COLUMNS].sum(axis=1) > 0]
             inactive_instances = env_df[env_df[self.MODULE_COLUMNS].sum(axis=1) == 0]
@@ -701,21 +745,10 @@ class SecurityModuleAnalyzer:
             total_instances = len(env_df['Hostname'].unique())
             module_usage_counts = {col: set(env_df[env_df[col] > 0]['Hostname']) for col in self.MODULE_COLUMNS}
             
-            # Calculate module usage percentage
-            module_usage_percentage = {}
-            for module, instances in module_usage_counts.items():
-                unique_instance_count = len(instances)
-                percentage = (unique_instance_count / total_instances) * 100
-                module_usage_percentage[module] = percentage
-            
-            # Calculate max concurrent instances
-            max_concurrent = 0
-            if 'Duration (Seconds)' in env_df.columns:
-                grouped = env_df.groupby('Hostname')
-                max_concurrent = max(len(g) for _, g in grouped)
-                total_hours = env_df['Duration (Seconds)'].sum() / 3600
-            else:
-                total_hours = 0
+            module_usage_percentage = {
+                module: (len(instances) / total_instances * 100) if total_instances > 0 else 0
+                for module, instances in module_usage_counts.items()
+            }
             
             metrics['by_environment'][env] = {
                 'active_instances': len(active_instances['Hostname'].unique()),
@@ -728,46 +761,17 @@ class SecurityModuleAnalyzer:
                     key=lambda col: len(module_usage_counts[col])
                 ) if sum(len(instances) for instances in module_usage_counts.values()) > 0 else "None",
                 'avg_modules_per_host': env_df[self.MODULE_COLUMNS].sum(axis=1).mean(),
-                'max_concurrent': max_concurrent,
-                'total_utilization_hours': total_hours,
-                'correlation_matrix': env_df[self.MODULE_COLUMNS].corr().to_dict()  # Add per-environment correlation
+                'max_concurrent': self._calculate_max_concurrent(env_df),
+                'total_utilization_hours': (env_df['Duration (Seconds)'].sum() / 3600) 
+                    if 'Duration (Seconds)' in env_df.columns else 0,
+                'correlation_matrix': env_df[self.MODULE_COLUMNS].corr().to_dict()
             }
+            progress.update(env_subtask, advance=1)
         
-        # Calculate overall metrics
-        total_active = len(self.data[self.data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
-        total_instances = len(self.data['Hostname'].unique())
-        
-        # Calculate hours with more detailed breakdown
-        active_hours = 0
-        inactive_hours = 0
-        if 'Duration (Seconds)' in self.data.columns:
-            # Add column indicating if instance has any modules
-            self.data['has_modules'] = self.data[self.MODULE_COLUMNS].sum(axis=1) > 0
-            
-            # Group by hostname and calculate max duration and module status
-            instance_hours = (self.data.groupby('Hostname')
-                             .agg({
-                                 'Duration (Seconds)': 'max',
-                                 'has_modules': 'any'
-                             }))
-            
-            # Calculate hours for active and inactive instances
-            active_hours = (instance_hours[instance_hours['has_modules']]['Duration (Seconds)'].sum()) / 3600
-            inactive_hours = (instance_hours[~instance_hours['has_modules']]['Duration (Seconds)'].sum()) / 3600
-        
-        metrics['overall'].update({
-            'active_instances': total_active,
-            'inactive_instances': total_instances - total_active,
-            'total_instances': total_instances,
-            'total_hours': active_hours + inactive_hours,
-            'active_hours': active_hours,
-            'inactive_hours': inactive_hours,
-            'module_usage': {col: self.data[col].sum() for col in self.MODULE_COLUMNS},
-            'environment_distribution': {
-                env: metrics['by_environment'][env]['total_instances'] 
-                for env in environments
-            }
-        })
+        progress.remove_task(env_subtask)
+        progress.update(metrics_task, completed=100)
+        progress.remove_task(metrics_task)
+        progress.update(parent_task, advance=20)
         
         return metrics
 
@@ -809,6 +813,17 @@ class SecurityModuleAnalyzer:
         
         # Get all computer groups (realms)
         realms = self.data['Computer Group'].fillna('Unknown').unique()
+        
+        # Calculate metrics for each realm
+        for realm in realms:
+            realm_data = self.data[self.data['Computer Group'].fillna('Unknown') == realm]
+            
+            # Calculate module usage
+            module_columns = ['AM', 'WRS', 'DC', 'AC', 'IM', 'LI', 'FW', 'DPI', 'SAP']
+            has_modules = realm_data[module_columns].sum(axis=1) > 0
+            
+            # Calculate unique instances and their states
+            unique_instances = realm_data['Hostname'].nunique()
         
         # Calculate metrics for each realm
         for realm in realms:
@@ -907,43 +922,46 @@ class SecurityModuleAnalyzer:
         
         return enhanced_metrics
 
-    def create_visualizations(self) -> Dict[str, plt.Figure]:
-        """
-        Create visualizations to represent module usage and environment distribution.
-
-        Returns:
-            Dict[str, plt.Figure]: A dictionary of visualization figures.
-        """
+    def create_visualizations(self, progress, parent_task) -> Dict[str, plt.Figure]:
+        """Create visualizations to represent module usage and environment distribution."""
         visualizations = {}
+        colors = {
+            'Production': '#2ecc71',
+            'Development': '#3498db',
+            'Test': '#e74c3c',
+            'Staging': '#f1c40f',
+            'Integration': '#9b59b6'
+        }
         
         try:
-            # Set style parameters
-            plt.style.use('default')
-            colors = {
-                'Production': 'lightcoral',
-                'Development': 'lightgreen',
-                'Test': 'lightblue',
-                'Staging': 'lightsalmon',
-                'DR': 'lightgray',
-                'UAT': 'plum',
-                'Integration': 'wheat'
-            }
+            # Create task for visualizations
+            viz_task = progress.add_task(
+                "[cyan]Creating visualizations...",
+                total=100,
+                visible=True
+            )
             
-            # 1. Stacked Module Usage Bar Chart
+            # 1. Module Usage Chart
+            progress.update(viz_task, description="[cyan]Creating module usage chart...")
             fig1, ax1 = plt.subplots(figsize=(15, 8))
             module_cols = self.MODULE_COLUMNS
             env_data = {}
             bottom = np.zeros(len(module_cols))
             
-            for env in ['Production', 'Development', 'Test', 'Staging', 'Integration']:
+            # Get environments from metrics, defaulting to empty if not present
+            environments = sorted(self.metrics.get('by_environment', {}).keys())
+            
+            for env in environments:
                 if env in self.metrics['by_environment']:
-                    env_data[env] = pd.Series(self.metrics['by_environment'][env]['module_usage'])
-                    ax1.bar(module_cols, env_data[env], 
-                           label=env, 
-                           color=colors.get(env, 'gray'),
-                           alpha=0.7,
-                           bottom=bottom)
-                    bottom += env_data[env]
+                    module_usage = self.metrics['by_environment'][env].get('module_usage', {})
+                    if module_usage:  # Only process if we have data
+                        env_data[env] = pd.Series(module_usage)
+                        ax1.bar(module_cols, env_data[env], 
+                               label=env, 
+                               color=colors.get(env, 'gray'),
+                               alpha=0.7,
+                               bottom=bottom)
+                        bottom += env_data[env]
             
             ax1.set_title('Security Module Usage Across Environments', pad=20)
             ax1.set_xlabel('Security Modules')
@@ -953,32 +971,51 @@ class SecurityModuleAnalyzer:
             plt.tight_layout()
             visualizations['module_usage'] = fig1
             
-            # 2. Environment distribution pie chart
+            # Save module usage chart
+            module_usage_path = self.output_dir / 'module_usage.png'
+            fig1.savefig(module_usage_path, dpi=300, bbox_inches='tight')
+            plt.close(fig1)
+            progress.update(viz_task, advance=40)
+            
+            # 2. Environment Distribution Chart
+            progress.update(viz_task, description="[cyan]Creating environment distribution chart...")
             fig2, ax2 = plt.subplots(figsize=(12, 12))
-            env_counts = pd.Series(self.metrics['overall']['environment_distribution'])
-            wedges, texts, autotexts = ax2.pie(env_counts.values,
-                                              labels=env_counts.index,
-                                              autopct='%1.1f%%',
-                                              colors=[colors.get(env, 'gray') for env in env_counts.index])
-            ax2.set_title('Distribution of Environments')
-            plt.setp(autotexts, size=8, weight="bold")
-            plt.setp(texts, size=10)
-            visualizations['environment_distribution'] = fig2
             
-            # Save all visualizations
-            for name, fig in visualizations.items():
-                fig.savefig(self.output_dir / f'{name}.png',
-                           dpi=300,
-                           bbox_inches='tight',
-                           facecolor='white',
-                           edgecolor='none')
+            # Create environment distribution data
+            env_counts = {}
+            for env in environments:
+                if env in self.metrics['by_environment']:
+                    env_counts[env] = self.metrics['by_environment'][env].get('total_instances', 0)
             
-            print(f"✓ Created {len(visualizations)} visualizations:")
-            for name in visualizations.keys():
-                print(f"  - {name.replace('_', ' ').title()}")
+            if env_counts:  # Only create pie chart if we have data
+                env_series = pd.Series(env_counts)
+                wedges, texts, autotexts = ax2.pie(
+                    env_series.values,
+                    labels=env_series.index,
+                    autopct='%1.1f%%',
+                    colors=[colors.get(env, 'gray') for env in env_series.index]
+                )
+                ax2.set_title('Distribution of Environments')
+                plt.setp(autotexts, size=8, weight="bold")
+                plt.setp(texts, size=10)
+                visualizations['environment_distribution'] = fig2
+                
+                # Save environment distribution chart
+                env_dist_path = self.output_dir / 'environment_distribution.png'
+                fig2.savefig(env_dist_path, dpi=300, bbox_inches='tight')
+                plt.close(fig2)
             
+            progress.update(viz_task, advance=40)
+            progress.update(viz_task, completed=100)
+            progress.remove_task(viz_task)
+            progress.update(parent_task, advance=20)
+            
+            logger.info("Visualizations created successfully")
+
         except Exception as e:
             logger.error(f"Error creating visualizations: {str(e)}")
+            if 'viz_task' in locals():
+                progress.remove_task(viz_task)
             raise
         
         return visualizations
@@ -994,49 +1031,55 @@ class SecurityModuleAnalyzer:
         Returns:
             str: The HTML content with embedded images.
         """
-        for name, fig in visualizations.items():
-            buffer = BytesIO()
-            fig.savefig(buffer, format='png', bbox_inches='tight')
-            buffer.seek(0)
-            img_str = base64.b64encode(buffer.read()).decode('utf-8')
-            img_tag = f'data:image/png;base64,{img_str}'
-            logger.debug(f"Embedding image for {name}: {img_tag[:100]}...")  # Log the first 100 characters of the base64 string
-
-            # Replace image source with embedded base64 string
-            html_content = re.sub(
-                rf'<img\s+src=["\']{re.escape(name)}\.png["\']\s+alt=["\'].*?["\']\s*/?>',
-                f'<img src="{img_tag}" alt="{name.replace("_", " ").title()}">',
-                html_content,
-                flags=re.IGNORECASE
-            )
-        
+        try:
+            for name in visualizations.keys():
+                # Read the saved PNG file
+                img_path = self.output_dir / f"{name}.png"
+                if img_path.exists():
+                    with open(img_path, 'rb') as img_file:
+                        img_data = img_file.read()
+                        img_str = base64.b64encode(img_data).decode('utf-8')
+                        img_tag = f'data:image/png;base64,{img_str}'
+                        
+                        # Replace image source in HTML
+                        pattern = rf'<img[^>]*src=[\'"]{name}\.png[\'"][^>]*>'
+                        replacement = f'<img src="{img_tag}" alt="{name.replace("_", " ").title()}">'
+                        html_content = re.sub(pattern, replacement, html_content)
+                        logger.debug(f"Successfully embedded image: {name}")
+                else:
+                    logger.warning(f"Image file not found: {img_path}")
+        except Exception as e:
+            logger.error(f"Error embedding images: {str(e)}")
+            
         return html_content
 
-    def create_pdf_report(self, context: Dict, pdf_path: Path) -> None:
-        """
-        Create a PDF report using ReportLab.
-
-        Parameters:
-            context (Dict): The context data for the report.
-            pdf_path (Path): The file path to save the PDF.
-        """
+    def create_pdf_report(self, context: Dict, pdf_path: Path, progress) -> None:
+        """Create a PDF report using ReportLab."""
         try:
+            # Create subtask for PDF generation
+            pdf_task = progress.add_task(
+                "[yellow]Generating PDF report...",
+                total=100,
+                visible=True
+            )
+            
             doc = SimpleDocTemplate(str(pdf_path), pagesize=letter,
-                                    rightMargin=72, leftMargin=72,
-                                    topMargin=72, bottomMargin=18)
+                                  rightMargin=72, leftMargin=72,
+                                  topMargin=72, bottomMargin=18)
             story = []
             styles = getSampleStyleSheet()
             styles.add(ParagraphStyle(name='Center', alignment=1))
-
-            # Title
+            
+            # Title and timestamp
+            progress.update(pdf_task, description="[yellow]Adding title and metadata...")
             story.append(Paragraph("Deep Security Usage Analyzer Report", styles['Title']))
             story.append(Spacer(1, 12))
-
-            # Timestamp
             story.append(Paragraph(f"Generated on: {context['timestamp']}", styles['Normal']))
             story.append(Spacer(1, 12))
-
+            progress.update(pdf_task, advance=20)
+            
             # Overall Metrics
+            progress.update(pdf_task, description="[yellow]Adding overall metrics...")
             story.append(Paragraph("Overall Metrics", styles['Heading2']))
             overall_data = [
                 ["Total Unique Instances", f"{context['metrics']['overall']['total_instances']:,}"],
@@ -1058,8 +1101,10 @@ class SecurityModuleAnalyzer:
             ]))
             story.append(table)
             story.append(Spacer(1, 24))
-
+            progress.update(pdf_task, advance=20)
+            
             # Environment Distribution
+            progress.update(pdf_task, description="[yellow]Adding environment metrics...")
             story.append(Paragraph("Environment Distribution", styles['Heading2']))
             env_data = [["Environment", "Total Hosts", "Active Hosts", "Most Used Module", "Max Concurrent", "Total Hours"]]
             for env, data in context['metrics']['by_environment'].items():
@@ -1083,173 +1128,114 @@ class SecurityModuleAnalyzer:
             ]))
             story.append(table)
             story.append(Spacer(1, 24))
-
-            # Module Usage Analysis
+            progress.update(pdf_task, advance=20)
+            
+            # Visualizations
+            progress.update(pdf_task, description="[yellow]Adding visualizations...")
             story.append(Paragraph("Module Usage Analysis", styles['Heading2']))
-            # Embed Module Usage Image
-            if 'module_usage.png' in [f.name for f in self.output_dir.glob('*')]:
-                img_path = self.output_dir / 'module_usage.png'
-                story.append(Image(str(img_path), width=6*inch, height=4*inch))
-                story.append(Spacer(1, 12))
-            # Embed Environment Distribution Image
-            if 'environment_distribution.png' in [f.name for f in self.output_dir.glob('*')]:
-                img_path = self.output_dir / 'environment_distribution.png'
-                story.append(Image(str(img_path), width=6*inch, height=6*inch))
-                story.append(Spacer(1, 12))
-
-            # Statistics Summary
-            story.append(Paragraph("Statistics Summary", styles['Heading2']))
-            stats_data = [
-                ["Metric", "Value"],
-                ["Total Unique Instances", f"{context['metrics']['overall']['total_instances']:,}"],
-                ["Instances Running at Least One Module", f"{context['metrics']['overall']['active_instances']:,}"],
-                ["Instances Not Running Any Modules", f"{context['metrics']['overall']['inactive_instances']:,}"],
-                ["Total Hours", f"{context['metrics']['overall']['total_hours']:.1f}"],
-                ["Hours for Instances with Modules", f"{context['metrics']['overall']['active_hours']:.1f}"],
-                ["Hours for Instances without Modules", f"{context['metrics']['overall']['inactive_hours']:.1f}"],
-                ["Max Concurrent Usage", f"{context['metrics']['overall_metrics']['max_concurrent_overall']:,}"],
-                ["Unknown Environment Instances", f"{context['metrics']['by_environment'].get('Unknown', {}).get('total_instances', 0):,}"]
-            ]
-            table = Table(stats_data, hAlign='LEFT')
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.grey),
-                ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
-                ('ALIGN',(0,0),(-1,-1),'LEFT'),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('BOTTOMPADDING', (0,0), (-1,0), 12),
-                ('BACKGROUND',(0,1),(-1,-1),colors.beige),
-                ('GRID', (0,0), (-1,-1), 1, colors.black),
-            ]))
-            story.append(table)
-            story.append(Spacer(1, 24))
-
-            # Monthly Data Analysis
-            story.append(Paragraph("Monthly Data Analysis", styles['Heading2']))
-            monthly_data = [
-                ["Month", "Active Instances", "Max Concurrent", "Avg Modules/Host", "Total Hours"]
-            ]
-            for month in context['metrics']['monthly']['data']:
-                monthly_data.append([
-                    month['month'],
-                    month['active_instances'],
-                    month['max_concurrent'],
-                    f"{month['avg_modules_per_host']:.2f}",
-                    f"{month['total_hours']:.1f}"
-                ])
-            table = Table(monthly_data, hAlign='LEFT')
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.grey),
-                ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
-                ('ALIGN',(0,0),(-1,-1),'LEFT'),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('BOTTOMPADDING', (0,0), (-1,0), 12),
-                ('BACKGROUND',(0,1),(-1,-1),colors.beige),
-                ('GRID', (0,0), (-1,-1), 1, colors.black),
-            ]))
-            story.append(table)
-            story.append(Spacer(1, 24))
-
-            # Data Gaps
-            if context['metrics']['monthly']['data_gaps']:
-                story.append(Paragraph("Data Gaps Detected", styles['Heading2']))
-                for gap in context['metrics']['monthly']['data_gaps']:
-                    story.append(Paragraph(f"- {gap}", styles['Normal']))
-                story.append(Spacer(1, 12))
-
-            # Unknown Environment Analysis
-            if context['metrics']['by_environment'].get('Unknown') and context['metrics']['by_environment']['Unknown']['total_instances'] > 0:
-                story.append(Paragraph("Unknown Environment Analysis", styles['Heading2']))
-                story.append(Paragraph(f"Number of hosts in unknown environment: {context['metrics']['by_environment']['Unknown']['total_instances']:,}", styles['Normal']))
-                story.append(Paragraph("Common patterns found in unknown hosts:", styles['Normal']))
-                for pattern in context['unknown_patterns']:
-                    story.append(Paragraph(f"- {pattern}", styles['Normal']))
-                story.append(Spacer(1, 12))
-
+            for img_name in ['module_usage.png', 'environment_distribution.png']:
+                if (self.output_dir / img_name).exists():
+                    img_path = self.output_dir / img_name
+                    img = Image(str(img_path), width=6*inch, height=4*inch)
+                    story.append(img)
+                    story.append(Spacer(1, 12))
+            progress.update(pdf_task, advance=20)
+            
+            # Build final PDF
+            progress.update(pdf_task, description="[yellow]Building PDF...")
             doc.build(story)
+            progress.update(pdf_task, completed=100)
+            progress.remove_task(pdf_task)
+            
             logger.info(f"PDF report generated successfully at {pdf_path}")
-
+            
         except Exception as e:
             logger.error(f"Failed to create PDF report: {str(e)}")
+            if 'pdf_task' in locals():
+                progress.remove_task(pdf_task)
+            raise
 
-    def generate_report(self) -> None:
-        """
-        Generate a comprehensive HTML and PDF report of the analysis.
-
-        The report includes overall metrics, environment distribution, module usage analysis, and monthly trends.
-        """
-        print("\nGenerating report...")
-        
+    def generate_report(self, progress, parent_task) -> None:
+        """Generate comprehensive HTML and PDF reports."""
         try:
-            # Stage 1: Calculate enhanced metrics
-            print("  ↳ Calculating enhanced metrics...")
-            enhanced_metrics = self.calculate_enhanced_metrics()
-            logger.debug(f"Enhanced Metrics: {enhanced_metrics}")
+            # Create task for report generation
+            report_task = progress.add_task(
+                "[cyan]Generating reports...",
+                total=100,
+                visible=True
+            )
             
-            # Stage 2: Prepare metrics for template
-            print("  ↳ Preparing template data...")
+            # Calculate enhanced metrics
+            progress.update(report_task, description="[cyan]Calculating enhanced metrics...")
+            enhanced_metrics = self.calculate_enhanced_metrics()
+            progress.update(report_task, advance=20)
+            
+            # Prepare report data
+            progress.update(report_task, description="[cyan]Preparing report data...")
             combined_metrics = {
                 'overall_metrics': enhanced_metrics['overall_metrics'],
                 'utilization_metrics': enhanced_metrics['utilization_metrics'],
                 'realm_metrics': enhanced_metrics['realm_metrics'],
                 'by_environment': self.metrics['by_environment'],
-                'overall': self.metrics['overall']
+                'overall': self.metrics['overall'],
+                'monthly': self.metrics.get('monthly', {
+                    'data': [],
+                    'data_gaps': [],
+                    'total_months': 0,
+                    'date_range': ''
+                })
             }
-            logger.debug(f"Combined Metrics: {combined_metrics}")
+            progress.update(report_task, advance=20)
             
-            # Stage 3: Calculate unknown patterns
-            print("  ↳ Analyzing unknown patterns...")
+            # Calculate unknown patterns
+            progress.update(report_task, description="[cyan]Analyzing unknown patterns...")
             unknown_patterns = []
             if 'Unknown' in self.metrics['by_environment']:
-                unknown_env = self.metrics['by_environment']['Unknown']
-                unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]  # Example extraction
-            logger.debug(f"Unknown Patterns: {unknown_patterns}")
+                unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]
+            progress.update(report_task, advance=20)
             
-            # Stage 4: Calculate monthly metrics
-            print("  ↳ Processing monthly data...")
-            monthly_metrics = self.calculate_monthly_metrics()
-            logger.debug(f"Monthly Metrics: {monthly_metrics}")
+            # Debug output
+            logger.debug("Combined metrics structure:")
+            logger.debug(json.dumps({k: str(v) for k, v in combined_metrics.items()}, indent=2))
             
-            # Ensure monthly metrics are included in combined metrics
-            combined_metrics['monthly'] = monthly_metrics
-            
-            # Stage 5: Create report context
-            print("  ↳ Preparing final report...")
+            # Create context and render template
+            progress.update(report_task, description="[cyan]Rendering report template...")
             report_context = {
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'metrics': combined_metrics,
                 'unknown_patterns': unknown_patterns
             }
-            logger.debug(f"Report Context: {report_context}")
             
-            # Convert metrics to serializable types
-            serializable_context = self._convert_to_serializable(report_context)
-            
-            # Stage 6: Render HTML template
-            print("  ↳ Rendering HTML template...")
             template = Template(self.REPORT_TEMPLATE)
-            report_html = template.render(**serializable_context)
+            report_html = template.render(**report_context)
             
-            # Stage 7: Create visualizations
-            print("  ↳ Creating visualizations...")
-            visualizations = self.create_visualizations()
-            # Embed images in HTML
-            report_html = self.embed_images_in_html(report_html, visualizations)
+            # NEW: Embed images into the HTML before saving
+            progress.update(report_task, description="[cyan]Embedding images in HTML...")
+            report_html = self.embed_images_in_html(report_html, {
+                'module_usage': None,  # We don't need the actual figure objects here
+                'environment_distribution': None
+            })
+            progress.update(report_task, advance=20)
             
-            # Stage 8: Save HTML Report
-            print("  ↳ Saving HTML report...")
+            # Save reports
+            progress.update(report_task, description="[cyan]Saving reports...")
             report_path = self.output_dir / 'report.html'
             with open(report_path, 'w', encoding='utf-8') as f:
                 f.write(report_html)
             
-            # Stage 9: Generate PDF Report with ReportLab
-            print("  ↳ Generating PDF report with ReportLab...")
-            self.create_pdf_report(report_context, self.output_dir / 'report.pdf')
-            logger.info(f"PDF report generated successfully at {self.output_dir / 'report.pdf'}")
-        
-        except TypeError as te:
-            logger.error(f"Failed to generate report: {str(te)}")
+            self.create_pdf_report(report_context, self.output_dir / 'report.pdf', progress)
+            
+            progress.update(report_task, completed=100)
+            progress.remove_task(report_task)
+            progress.update(parent_task, advance=20)
+            
+            logger.info(f"Reports generated successfully at {self.output_dir}")
+            
         except Exception as e:
             logger.error(f"Failed to generate report: {str(e)}")
+            if 'report_task' in locals():
+                progress.remove_task(report_task)
+            raise
 
     def _convert_to_serializable(self, obj):
         """
@@ -1281,58 +1267,82 @@ class SecurityModuleAnalyzer:
         This includes loading data, calculating metrics, creating visualizations, and generating the report.
         """
         try:
-            total_steps = 5
-            current_step = 0
-
-            def update_progress(step_name: str):
-                nonlocal current_step
-                current_step += 1
-                print(f"\n[{current_step}/{total_steps}] {step_name}")
-                logger.info(f"Starting: {step_name}")
-
-            # Step 1: Load and preprocess data
-            update_progress("Loading and preprocessing data...")
-            self.data = self.load_and_preprocess_data()
-
-            # Step 2: Calculate metrics
-            update_progress("Calculating basic metrics...")
-            self.metrics = self.calculate_metrics()
-
-            # Step 3: Calculate monthly metrics
-            update_progress("Analyzing monthly trends...")
-            monthly_metrics = self.calculate_monthly_metrics()
-
-            # Step 4: Create visualizations
-            update_progress("Generating visualizations...")
-            visualizations = self.create_visualizations()
-
-            # Step 5: Generate report
-            update_progress("Generating final report...")
-            self.generate_report()
-
-            # Single summary at the end
-            results = {
-                'metrics': self.metrics,
-                'monthly_metrics': monthly_metrics,
-                'visualizations': visualizations,
-                'raw_data': self.data,
-                'analysis_timestamp': datetime.now().isoformat()
-            }
+            with Progress(
+                SpinnerColumn(),
+                *Progress.get_default_columns(),
+                TimeElapsedColumn(),
+                console=console,
+                expand=True
+            ) as progress:
+                # Main progress task for overall analysis
+                main_task = progress.add_task("[cyan]Analyzing data...", total=5)
+                
+                # Step 1: Load and preprocess data
+                data_task = progress.add_task("[yellow]Loading and preprocessing data...", total=100, visible=True)
+                self.data = self.load_and_preprocess_data(progress, data_task)
+                progress.update(main_task, advance=1)
+                
+                # Step 2: Calculate metrics
+                metrics_task = progress.add_task("[yellow]Calculating basic metrics...", total=100)
+                self.metrics = self.calculate_metrics(progress, metrics_task)
+                progress.update(main_task, advance=1)
+                
+                # Step 3: Calculate monthly trends
+                monthly_task = progress.add_task("[yellow]Analyzing monthly trends...", total=100)
+                monthly_metrics = self.calculate_monthly_metrics(progress, monthly_task)
+                # Add monthly metrics to the main metrics dictionary
+                self.metrics['monthly'] = monthly_metrics
+                progress.update(main_task, advance=1)
+                
+                # Step 4: Create visualizations
+                viz_task = progress.add_task("[yellow]Generating visualizations...", total=100)
+                visualizations = self.create_visualizations(progress, viz_task)
+                progress.update(main_task, advance=1)
+                
+                # Step 5: Generate report
+                report_task = progress.add_task("[yellow]Generating final report...", total=100)
+                
+                # Add enhanced metrics before generating report
+                enhanced_task = progress.add_task("[yellow]Calculating enhanced metrics...", total=100)
+                enhanced_metrics = self.calculate_enhanced_metrics()
+                self.metrics['overall_metrics'] = enhanced_metrics['overall_metrics']
+                self.metrics['utilization_metrics'] = enhanced_metrics['utilization_metrics']
+                self.metrics['realm_metrics'] = enhanced_metrics['realm_metrics']
+                progress.update(enhanced_task, completed=100)
+                progress.remove_task(enhanced_task)
+                
+                # Generate the report
+                self.generate_report(progress, report_task)
+                progress.update(main_task, advance=1)
+                
+                # Store results
+                results = {
+                    'metrics': self.metrics,
+                    'monthly_metrics': monthly_metrics,
+                    'visualizations': visualizations,
+                    'raw_data': self.data,
+                    'analysis_timestamp': datetime.now().isoformat()
+                }
 
             # Print final summary
-            print("\nAnalysis Complete!")
-            print(f"✓ Processed {len(self.data):,} records from {len(self.data['Hostname'].unique()):,} unique hosts")
-            print(f"✓ Report and visualizations saved to: {self.output_dir}")
-
+            summary = [
+                "[green]Analysis Complete![/green]",
+                f"✓ Processed {len(self.data):,} records",
+                f"✓ Analyzed {len(self.data['Hostname'].unique()):,} unique hosts",
+                f"✓ Report and visualizations saved to: {self.output_dir}"
+            ]
+            
             if 'Unknown' in self.metrics['by_environment']:
                 unknown_count = self.metrics['by_environment']['Unknown']['total_instances']
-                print(f"⚠️  {unknown_count:,} hosts in unknown environment")
-
+                summary.append(f"[yellow]⚠️  {unknown_count:,} hosts in unknown environment[/yellow]")
+            
+            console.print(Panel("\n".join(summary), title="Analysis Summary", border_style="cyan"))
+            
             return results
 
         except Exception as e:
             logger.error(f"Analysis failed: {str(e)}")
-            print(f"\n❌ Error: {str(e)}")
+            console.print(f"[red]❌ Error: {str(e)}[/red]")
             raise
 
 def main():
