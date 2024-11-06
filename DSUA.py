@@ -965,17 +965,11 @@ class SecurityModuleAnalyzer:
             plt.setp(texts, size=10)
             visualizations['environment_distribution'] = fig2
             
-            # Save all visualizations
+            # Save all visualizations without logging again
             for name, fig in visualizations.items():
-                fig.savefig(self.output_dir / f'{name}.png',
-                           dpi=300,
-                           bbox_inches='tight',
-                           facecolor='white',
-                           edgecolor='none')
-            
-            print(f"✓ Created {len(visualizations)} visualizations:")
-            for name in visualizations.keys():
-                print(f"  - {name.replace('_', ' ').title()}")
+                fig_path = self.output_dir / f"{name}.png"
+                fig.savefig(fig_path, format='png', bbox_inches='tight')
+                plt.close(fig)
             
         except Exception as e:
             logger.error(f"Error creating visualizations: {str(e)}")
