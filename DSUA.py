@@ -134,7 +134,7 @@ class SecurityModuleAnalyzer:
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Security Module Analysis Report</title>
+        <title>Deep Security Usage Analyzer Report</title>
         <style>
             body { 
                 font-family: Arial, sans-serif; 
