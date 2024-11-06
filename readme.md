@@ -15,7 +15,7 @@ The Trend Micro Deep Security Usage Analyzer (DSUA) is a comprehensive tool desi
 
 ## Overview
 
-DSUA aims to provide a clear understanding of module usage patterns by analyzing data exported from Deep Security. It handles large datasets by deduplicating files and entries, ensuring accurate and efficient analysis.
+DSUA aims to provide a clear understanding of module usage patterns by analyzing data exported from Deep Security. It handles large datasets by deduplicating files and entries, ensuring accurate and efficient analysis. It generates various reports, including metrics summaries, visualizations, and comprehensive, single-file, HTML and PDF reports to present the analysis results effectively.
 
 ## Prerequisites
 
@@ -26,6 +26,7 @@ DSUA aims to provide a clear understanding of module usage patterns by analyzing
   - matplotlib
   - seaborn
   - jinja2
+  - reportlab
 
 Install the necessary packages using:
 
@@ -155,8 +156,15 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
     - Summary of findings.
     - Interactive charts and graphs.
     - Detailed tables with drill-down capability.
+- **PDF Report Creation:**
+  - **Template Rendering:**
+    - A PDF template is populated with the calculated metrics and visualizations.
+  - **Report Contents:**
+    - Summary of findings.
+    - Interactive charts and graphs.
+    - Detailed tables with drill-down capability.
 - **Output:**
-  - The final report is saved as `deep_security_usage_report.html` for easy sharing and review.
+  - The final report is saved as `deep_security_usage_report.html` and `deep_security_usage_report.pdf` for easy sharing and review.
 
 ### 7. Logging and Audit Trail
 
@@ -278,6 +286,7 @@ These calculations are performed using the data extracted from the various CSV a
 After running DSUA, the following outputs are generated in the `output` directory:
 
 - `report.html`: A comprehensive report detailing the analysis.
+- `report.pdf`: A PDF version of the comprehensive report.
 - `metrics.json`: A JSON file containing all calculated metrics.
 - `processed_data.csv`: The cleaned and combined dataset used for analysis.
 - Visualization images (e.g., `module_usage.png`, `environment_distribution.png`).

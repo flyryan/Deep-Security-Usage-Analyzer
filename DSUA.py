@@ -16,6 +16,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 from jinja2 import Template
+import base64
+from io import BytesIO
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+import re  # Add this import at the top of the file if not already present
 
 # Custom logging formatter with colors and symbols
 class ColoredFormatter(logging.Formatter):
@@ -975,9 +983,197 @@ class SecurityModuleAnalyzer:
         
         return visualizations
 
+    def embed_images_in_html(self, html_content: str, visualizations: Dict[str, plt.Figure]) -> str:
+        """
+        Embed images directly into the HTML content as base64 strings.
+
+        Parameters:
+            html_content (str): The HTML content to embed images into.
+            visualizations (Dict[str, plt.Figure]): The visualizations to embed.
+
+        Returns:
+            str: The HTML content with embedded images.
+        """
+        for name, fig in visualizations.items():
+            buffer = BytesIO()
+            fig.savefig(buffer, format='png', bbox_inches='tight')
+            buffer.seek(0)
+            img_str = base64.b64encode(buffer.read()).decode('utf-8')
+            img_tag = f'data:image/png;base64,{img_str}'
+            logger.debug(f"Embedding image for {name}: {img_tag[:100]}...")  # Log the first 100 characters of the base64 string
+
+            # Replace image source with embedded base64 string
+            html_content = re.sub(
+                rf'<img\s+src=["\']{re.escape(name)}\.png["\']\s+alt=["\'].*?["\']\s*/?>',
+                f'<img src="{img_tag}" alt="{name.replace("_", " ").title()}">',
+                html_content,
+                flags=re.IGNORECASE
+            )
+        
+        return html_content
+
+    def create_pdf_report(self, context: Dict, pdf_path: Path) -> None:
+        """
+        Create a PDF report using ReportLab.
+
+        Parameters:
+            context (Dict): The context data for the report.
+            pdf_path (Path): The file path to save the PDF.
+        """
+        try:
+            doc = SimpleDocTemplate(str(pdf_path), pagesize=letter,
+                                    rightMargin=72, leftMargin=72,
+                                    topMargin=72, bottomMargin=18)
+            story = []
+            styles = getSampleStyleSheet()
+            styles.add(ParagraphStyle(name='Center', alignment=1))
+
+            # Title
+            story.append(Paragraph("Deep Security Usage Analyzer Report", styles['Title']))
+            story.append(Spacer(1, 12))
+
+            # Timestamp
+            story.append(Paragraph(f"Generated on: {context['timestamp']}", styles['Normal']))
+            story.append(Spacer(1, 12))
+
+            # Overall Metrics
+            story.append(Paragraph("Overall Metrics", styles['Heading2']))
+            overall_data = [
+                ["Total Unique Instances", f"{context['metrics']['overall']['total_instances']:,}"],
+                ["Active Instances", f"{context['metrics']['overall']['active_instances']:,}"],
+                ["Inactive Instances", f"{context['metrics']['overall']['inactive_instances']:,}"],
+                ["Total Hours", f"{context['metrics']['overall']['total_hours']:.1f}"],
+                ["Active Hours", f"{context['metrics']['overall']['active_hours']:.1f}"],
+                ["Inactive Hours", f"{context['metrics']['overall']['inactive_hours']:.1f}"]
+            ]
+            table = Table(overall_data, hAlign='LEFT')
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+                ('ALIGN',(0,0),(-1,-1),'LEFT'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND',(0,1),(-1,-1),colors.beige),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ]))
+            story.append(table)
+            story.append(Spacer(1, 24))
+
+            # Environment Distribution
+            story.append(Paragraph("Environment Distribution", styles['Heading2']))
+            env_data = [["Environment", "Total Hosts", "Active Hosts", "Most Used Module", "Max Concurrent", "Total Hours"]]
+            for env, data in context['metrics']['by_environment'].items():
+                env_data.append([
+                    env,
+                    f"{data['total_instances']}",
+                    f"{data['active_instances']}",
+                    data['most_common_module'],
+                    f"{data['max_concurrent'] if data['max_concurrent'] else 'N/A'}",
+                    f"{data['total_utilization_hours']:.1f}" if data['total_utilization_hours'] != "N/A" else "N/A"
+                ])
+            table = Table(env_data, hAlign='LEFT')
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+                ('ALIGN',(0,0),(-1,-1),'LEFT'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND',(0,1),(-1,-1),colors.beige),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ]))
+            story.append(table)
+            story.append(Spacer(1, 24))
+
+            # Module Usage Analysis
+            story.append(Paragraph("Module Usage Analysis", styles['Heading2']))
+            # Embed Module Usage Image
+            if 'module_usage.png' in [f.name for f in self.output_dir.glob('*')]:
+                img_path = self.output_dir / 'module_usage.png'
+                story.append(Image(str(img_path), width=6*inch, height=4*inch))
+                story.append(Spacer(1, 12))
+            # Embed Environment Distribution Image
+            if 'environment_distribution.png' in [f.name for f in self.output_dir.glob('*')]:
+                img_path = self.output_dir / 'environment_distribution.png'
+                story.append(Image(str(img_path), width=6*inch, height=6*inch))
+                story.append(Spacer(1, 12))
+
+            # Statistics Summary
+            story.append(Paragraph("Statistics Summary", styles['Heading2']))
+            stats_data = [
+                ["Metric", "Value"],
+                ["Total Unique Instances", f"{context['metrics']['overall']['total_instances']:,}"],
+                ["Instances Running at Least One Module", f"{context['metrics']['overall']['active_instances']:,}"],
+                ["Instances Not Running Any Modules", f"{context['metrics']['overall']['inactive_instances']:,}"],
+                ["Total Hours", f"{context['metrics']['overall']['total_hours']:.1f}"],
+                ["Hours for Instances with Modules", f"{context['metrics']['overall']['active_hours']:.1f}"],
+                ["Hours for Instances without Modules", f"{context['metrics']['overall']['inactive_hours']:.1f}"],
+                ["Max Concurrent Usage", f"{context['metrics']['overall_metrics']['max_concurrent_overall']:,}"],
+                ["Unknown Environment Instances", f"{context['metrics']['by_environment'].get('Unknown', {}).get('total_instances', 0):,}"]
+            ]
+            table = Table(stats_data, hAlign='LEFT')
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+                ('ALIGN',(0,0),(-1,-1),'LEFT'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND',(0,1),(-1,-1),colors.beige),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ]))
+            story.append(table)
+            story.append(Spacer(1, 24))
+
+            # Monthly Data Analysis
+            story.append(Paragraph("Monthly Data Analysis", styles['Heading2']))
+            monthly_data = [
+                ["Month", "Active Instances", "Max Concurrent", "Avg Modules/Host", "Total Hours"]
+            ]
+            for month in context['metrics']['monthly']['data']:
+                monthly_data.append([
+                    month['month'],
+                    month['active_instances'],
+                    month['max_concurrent'],
+                    f"{month['avg_modules_per_host']:.2f}",
+                    f"{month['total_hours']:.1f}"
+                ])
+            table = Table(monthly_data, hAlign='LEFT')
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+                ('ALIGN',(0,0),(-1,-1),'LEFT'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND',(0,1),(-1,-1),colors.beige),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ]))
+            story.append(table)
+            story.append(Spacer(1, 24))
+
+            # Data Gaps
+            if context['metrics']['monthly']['data_gaps']:
+                story.append(Paragraph("Data Gaps Detected", styles['Heading2']))
+                for gap in context['metrics']['monthly']['data_gaps']:
+                    story.append(Paragraph(f"- {gap}", styles['Normal']))
+                story.append(Spacer(1, 12))
+
+            # Unknown Environment Analysis
+            if context['metrics']['by_environment'].get('Unknown') and context['metrics']['by_environment']['Unknown']['total_instances'] > 0:
+                story.append(Paragraph("Unknown Environment Analysis", styles['Heading2']))
+                story.append(Paragraph(f"Number of hosts in unknown environment: {context['metrics']['by_environment']['Unknown']['total_instances']:,}", styles['Normal']))
+                story.append(Paragraph("Common patterns found in unknown hosts:", styles['Normal']))
+                for pattern in context['unknown_patterns']:
+                    story.append(Paragraph(f"- {pattern}", styles['Normal']))
+                story.append(Spacer(1, 12))
+
+            doc.build(story)
+            logger.info(f"PDF report generated successfully at {pdf_path}")
+
+        except Exception as e:
+            logger.error(f"Failed to create PDF report: {str(e)}")
+
     def generate_report(self) -> None:
         """
-        Generate a comprehensive HTML report of the analysis.
+        Generate a comprehensive HTML and PDF report of the analysis.
 
         The report includes overall metrics, environment distribution, module usage analysis, and monthly trends.
         """
@@ -987,6 +1183,7 @@ class SecurityModuleAnalyzer:
             # Stage 1: Calculate enhanced metrics
             print("  ↳ Calculating enhanced metrics...")
             enhanced_metrics = self.calculate_enhanced_metrics()
+            logger.debug(f"Enhanced Metrics: {enhanced_metrics}")
             
             # Stage 2: Prepare metrics for template
             print("  ↳ Preparing template data...")
@@ -997,70 +1194,85 @@ class SecurityModuleAnalyzer:
                 'by_environment': self.metrics['by_environment'],
                 'overall': self.metrics['overall']
             }
+            logger.debug(f"Combined Metrics: {combined_metrics}")
             
             # Stage 3: Calculate unknown patterns
             print("  ↳ Analyzing unknown patterns...")
             unknown_patterns = []
             if 'Unknown' in self.metrics['by_environment']:
-                unknown_hosts = self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique()
-                patterns = pd.Series(unknown_hosts).str.extract(r'([a-zA-Z]+\d*)[.-]')[0].value_counts()
-                unknown_patterns = [f"Pattern '{pattern}' found in {count} hosts" 
-                                  for pattern, count in patterns.items()]
+                unknown_env = self.metrics['by_environment']['Unknown']
+                unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]  # Example extraction
+            logger.debug(f"Unknown Patterns: {unknown_patterns}")
             
             # Stage 4: Calculate monthly metrics
             print("  ↳ Processing monthly data...")
-            try:
-                monthly_metrics = self.calculate_monthly_metrics()
-            except Exception as e:
-                monthly_metrics = {
-                    'data': [],
-                    'data_gaps': [],
-                    'total_months': 0,
-                    'date_range': ''
-                }
-                logger.warning(f"Unable to calculate monthly metrics: {str(e)}")
+            monthly_metrics = self.calculate_monthly_metrics()
+            logger.debug(f"Monthly Metrics: {monthly_metrics}")
+            
+            # Ensure monthly metrics are included in combined metrics
+            combined_metrics['monthly'] = monthly_metrics
             
             # Stage 5: Create report context
             print("  ↳ Preparing final report...")
             report_context = {
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'metrics': {
-                    'overall_metrics': enhanced_metrics['overall_metrics'],
-                    'utilization_metrics': enhanced_metrics['utilization_metrics'],
-                    'realm_metrics': enhanced_metrics['realm_metrics'],
-                    'by_environment': self.metrics['by_environment'],
-                    'overall': self.metrics['overall'],
-                    'monthly': monthly_metrics
-                },
+                'metrics': combined_metrics,
                 'unknown_patterns': unknown_patterns
             }
+            logger.debug(f"Report Context: {report_context}")
             
-            # Stage 6: Render template
+            # Convert metrics to serializable types
+            serializable_context = self._convert_to_serializable(report_context)
+            
+            # Stage 6: Render HTML template
+            print("  ↳ Rendering HTML template...")
             template = Template(self.REPORT_TEMPLATE)
-            report_html = template.render(**report_context)
+            report_html = template.render(**serializable_context)
             
-            # Stage 7: Save files
-            print("  ↳ Saving report files...")
+            # Stage 7: Create visualizations
+            print("  ↳ Creating visualizations...")
+            visualizations = self.create_visualizations()
+            # Embed images in HTML
+            report_html = self.embed_images_in_html(report_html, visualizations)
+            
+            # Stage 8: Save HTML Report
+            print("  ↳ Saving HTML report...")
             report_path = self.output_dir / 'report.html'
-            metrics_path = self.output_dir / 'metrics.json'
-            data_path = self.output_dir / 'processed_data.csv'
-            
             with open(report_path, 'w', encoding='utf-8') as f:
                 f.write(report_html)
             
-            with open(metrics_path, 'w', encoding='utf-8') as f:
-                json.dump(combined_metrics, f, indent=2, default=str)
-            
-            self.data.to_csv(data_path, index=False)
-            
-            print("\n✓ Report generation complete:")
-            print(f"  - Report: {report_path}")
-            print(f"  - Metrics: {metrics_path}")
-            print(f"  - Data: {data_path}")
-            
+            # Stage 9: Generate PDF Report with ReportLab
+            print("  ↳ Generating PDF report with ReportLab...")
+            self.create_pdf_report(report_context, self.output_dir / 'report.pdf')
+            logger.info(f"PDF report generated successfully at {self.output_dir / 'report.pdf'}")
+        
+        except TypeError as te:
+            logger.error(f"Failed to generate report: {str(te)}")
         except Exception as e:
             logger.error(f"Failed to generate report: {str(e)}")
-            raise
+
+    def _convert_to_serializable(self, obj):
+        """
+        Recursively convert NumPy data types to native Python types.
+        
+        Parameters:
+            obj: The object to convert.
+            
+        Returns:
+            The converted object.
+        """
+        if isinstance(obj, dict):
+            return {k: self._convert_to_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_to_serializable(item) for item in obj]
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        else:
+            return obj
 
     def analyze(self) -> None:
         """
@@ -1111,13 +1323,13 @@ class SecurityModuleAnalyzer:
             print("\nAnalysis Complete!")
             print(f"✓ Processed {len(self.data):,} records from {len(self.data['Hostname'].unique()):,} unique hosts")
             print(f"✓ Report and visualizations saved to: {self.output_dir}")
-            
+
             if 'Unknown' in self.metrics['by_environment']:
                 unknown_count = self.metrics['by_environment']['Unknown']['total_instances']
                 print(f"⚠️  {unknown_count:,} hosts in unknown environment")
-            
+
             return results
-                
+
         except Exception as e:
             logger.error(f"Analysis failed: {str(e)}")
             print(f"\n❌ Error: {str(e)}")

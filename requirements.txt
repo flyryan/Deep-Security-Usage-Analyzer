@@ -5,3 +5,4 @@ seaborn
 jinja2
 openpyxl
 xlrd
+reportlab
