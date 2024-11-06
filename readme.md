@@ -33,49 +33,6 @@ Install the necessary packages using:
 pip install -r requirements.txt
 ```
 
-### [readme.md](file:///Users/ryand/Library/CloudStorage/OneDrive-TrendMicro/Documents/Code/Usage%20Reports/readme.md)
-
-Include instructions for using `dedupe.py` to perform file deduplication before running DSUA.
-
-```markdown
-
-
-
-# Trend Micro Deep Security Usage Analyzer (DSUA)
-
-The Trend Micro Deep Security Usage Analyzer (DSUA) is a comprehensive tool designed to analyze module usage across different environments within Trend Micro's Deep Security. It processes usage data, deduplicates files and entries for efficiency, and generates detailed reports and visualizations to provide insights into module utilization.
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Prerequisites](#prerequisites)
-- [Deduplication Process](#deduplication-process)
-- [Usage](#usage)
-- [Workflow](#workflow)
-- [Output](#output)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Overview
-
-DSUA aims to provide a clear understanding of module usage patterns by analyzing data exported from Deep Security. It handles large datasets by deduplicating files and entries, ensuring accurate and efficient analysis.
-
-## Prerequisites
-
-- Python 3.7 or higher
-- Required Python packages:
-  - pandas
-  - numpy
-  - matplotlib
-  - seaborn
-  - jinja2
-
-Install the necessary packages using:
-
-```bash
-pip install -r requirements.txt
-```
-
 ## Deduplication Process
 
 The deduplication process is a critical step to ensure efficiency and accuracy:
