@@ -899,11 +899,11 @@ class SecurityModuleAnalyzer:
             'average_hours_per_instance': total_utilization / total_unique_instances if total_unique_instances > 0 else 0
         }
         
-        # Print summary
-        print("\nEnhanced Metrics Summary:")
-        print(f"Total Unique Instances: {enhanced_metrics['overall_metrics']['total_unique_instances']:,}")
-        print(f"Active Instances: {enhanced_metrics['overall_metrics']['total_active_instances']:,}")
-        print(f"Inactive Instances: {enhanced_metrics['overall_metrics']['total_inactive_instances']:,}")
+        # Suppress Enhanced Metrics Summary output
+        # print("\nEnhanced Metrics Summary:")
+        # print(f"Total Unique Instances: {enhanced_metrics['overall_metrics']['total_unique_instances']:,}")
+        # print(f"Active Instances: {enhanced_metrics['overall_metrics']['total_active_instances']:,}")
+        # print(f"Inactive Instances: {enhanced_metrics['overall_metrics']['total_inactive_instances']:,}")
         
         return enhanced_metrics
 
@@ -1309,6 +1309,10 @@ class SecurityModuleAnalyzer:
             # Step 5: Generate report
             update_progress("Generating final report...")
             self.generate_report()
+
+            # Save metrics to JSON
+            with open(self.output_dir / 'metrics.json', 'w') as json_file:
+                json.dump(self.metrics, json_file, indent=4)
 
             # Single summary at the end
             results = {
