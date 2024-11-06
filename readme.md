@@ -100,7 +100,7 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
 - **Data Concatenation:**
   - All individual data files are merged into a single dataset.
 - **Entry Deduplication Logic:**
-  - **Criteria:** Duplicate rows are identified based on a unique combination of key columns (e.g., hostname, IP address).
+  - **Criteria:** Duplicate rows are identified based on a unique combination of all columns.
   - **Process:**
     - Sorts the data to group potential duplicates together.
     - Uses a defined key to compare rows and remove duplicates.
@@ -142,7 +142,8 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
 ### 6. Reporting and Visualization
 
 - **Metric Generation:**
-  - Key statistics are compiled, such as total number of instances per environment, module usage counts, and percentages.
+  - Key statistics are compiled, such as total number of instances per environment, module usage counts, and percentages. (See [Metric Calculation Logic](#metric-calculation-logic))
+
 - **Visualization:**
   - Graphs and charts are created to visually represent module usage across environments.
   - **Tools Used:**
@@ -166,11 +167,7 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
     - **DEBUG:** Detailed information useful for diagnosing issues.
     - **ERROR:** Records any errors encountered during execution.
 - **Log Files:**
-  - Logs are written to 
-
-security_analysis.log
-
-, providing a time-stamped record of the script's activities.
+  - Logs are written to security_analysis.log, providing a time-stamped record of the script's activities.
 - **Purpose for Auditing:**
   - Enables auditors to trace the script's execution flow.
   - Assists in verifying that all steps were performed correctly.
@@ -192,6 +189,87 @@ security_analysis.log
   - **Module Definitions:** Ability to update which modules are analyzed.
 - **Usage Instructions:**
   - Parameters can be set via command-line arguments or a configuration file.
+
+### Metric Calculation Logic
+
+- **Total Number of Instances per Environment:**
+  - We aggregate the total number of instances by summing up the `active_instances` and `inactive_instances` for each environment.
+  - Example:
+    ```json
+    "Development": {
+      "active_instances": 6142,
+      "inactive_instances": 106,
+      "total_instances": 6218
+    }
+    ```
+
+- **Module Usage Counts:**
+  - We count the number of instances where each module is enabled. This is done by summing the binary indicators (1 for enabled, 0 for disabled) for each module across all instances.
+  - Example:
+    ```json
+    "module_usage": {
+      "AM": 22519.0,
+      "WRS": 69.0,
+      "DC": 0.0,
+      "AC": 4.0,
+      "IM": 10057.0,
+      "LI": 8976.0,
+      "FW": 628.0,
+      "DPI": 22076.0,
+      "SAP": 0.0
+    }
+    ```
+
+- **Module Usage Percentages:**
+  - We calculate the percentage of instances using each module by dividing the module usage count by the total number of instances and multiplying by 100.
+  - Formula: 
+    \[
+    \text{Percentage} = \left( \frac{\text{Module Usage Count}}{\text{Total Instances}} \right) \times 100
+    \]
+  - Example:
+    ```json
+    "module_usage_percentage": {
+      "AM": 362.1582502412351,
+      "WRS": 1.109681569636539,
+      "DC": 0.0,
+      "AC": 0.0643293663557414,
+      "IM": 161.7401093599228,
+      "LI": 144.35509810228368,
+      "FW": 10.099710517851399,
+      "DPI": 355.03377291733676,
+      "SAP": 0.0
+    }
+    ```
+
+- **Most Common Module:**
+  - We determine the most common module by identifying the module with the highest usage count.
+  - Example:
+    ```json
+    "most_common_module": "AM"
+    ```
+
+- **Average Modules per Host:**
+  - We calculate the average number of modules enabled per host by dividing the total module usage count by the total number of instances.
+  - Example:
+    ```json
+    "avg_modules_per_host": 2.4001286587327115
+    ```
+
+- **Max Concurrent Instances:**
+  - We identify the maximum number of instances that were active concurrently.
+  - Example:
+    ```json
+    "max_concurrent": 117
+    ```
+
+- **Total Utilization Hours:**
+  - We sum the total utilization hours for all instances.
+  - Example:
+    ```json
+    "total_utilization_hours": 17774512.72833333
+    ```
+
+These calculations are performed using the data extracted from the various CSV and JSON files, as detailed in the earlier steps.
 
 ## Output
 
