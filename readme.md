@@ -221,22 +221,22 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
     ```
 
 - **Module Usage Percentages:**
-  - We calculate the percentage of instances using each module by dividing the module usage count by the total number of instances and multiplying by 100.
-  - Formula: `Percentage = (Module Usage Count / Total Instances) * 100`
-  - Example:
-    ```json
-    "module_usage_percentage": {
-      "AM": 362.1582502412351,
-      "WRS": 1.109681569636539,
-      "DC": 0.0,
-      "AC": 0.0643293663557414,
-      "IM": 161.7401093599228,
-      "LI": 144.35509810228368,
-      "FW": 10.099710517851399,
-      "DPI": 355.03377291733676,
-      "SAP": 0.0
-    }
-    ```
+    - We calculate the percentage of instances using each module by dividing the module usage count by the total number of instances and multiplying by 100.
+    - Formula: `Percentage = (Module Usage Count / Total Instances) * 100`
+    - Example:
+        ```json
+        "module_usage_percentage": {
+            "AM": 36.22,
+            "WRS": 0.69,
+            "DC": 0.0,
+            "AC": 0.04,
+            "IM": 16.18,
+            "LI": 14.52,
+            "FW": 1.02,
+            "DPI": 35.52,
+            "SAP": 0.0
+        }
+        ```
 
 - **Most Common Module:**
   - We determine the most common module by identifying the module with the highest usage count.
@@ -253,11 +253,16 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
     ```
 
 - **Max Concurrent Instances:**
-  - We identify the maximum number of instances that were active concurrently.
-  - Example:
-    ```json
-    "max_concurrent": 117
-    ```
+    - We identify the maximum number of instances that were active concurrently.
+    - **Method:**
+        - The script processes the start and stop times of each instance to determine periods of activity.
+        - It creates a timeline of events, marking the start and stop of each instance.
+        - By iterating through this timeline, the script calculates the number of active instances at any given time.
+        - The maximum value encountered during this iteration is recorded as the maximum concurrent instances.
+    - Example:
+        ```json
+        "max_concurrent": 117
+        ```
 
 - **Total Utilization Hours:**
   - We sum the total utilization hours for all instances.
