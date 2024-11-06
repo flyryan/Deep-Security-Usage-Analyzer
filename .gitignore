@@ -1,0 +1,18 @@
+# Ignore Excel files
+*.xlsx
+*.xls
+
+# Ignore CSV files
+*.csv
+
+# Ignore log files
+*.log
+
+# Ignore temporary files
+*.tmp
+*.bak
+*.swp
+
+# Ignore output directory
+/output/
+.DS_Store
