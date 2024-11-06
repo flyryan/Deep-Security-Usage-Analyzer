@@ -34,6 +34,17 @@ Install the necessary packages using:
 pip install -r requirements.txt
 ```
 
+## Features
+
+- **Comprehensive Analysis:** DSUA processes usage data from multiple environments at the same time and generates detailed reports.
+- **Deduplication:** Automatically removes duplicate files and entries, ensuring accurate analysis without redundancy. This feature allows you to dump in any and every usage report you have without having to worry about overlapping or duplicate data.
+- **Environment Classification:** Classifies data entries into environments like Production, Development, Test, etc., based on hostname and IP patterns.
+- **Module Usage Metrics:** Calculates usage metrics for various Deep Security modules, providing insights into their utilization.
+- **Visualizations:** Generates visual representations of module usage and environment distribution.
+- **HTML and PDF Reports:** Creates comprehensive reports in both HTML and PDF formats for easy sharing and review.
+- **Error Handling:** Robust error handling and logging to ensure smooth execution and easy troubleshooting.
+- **Customizable:** Adjustable parameters for environment patterns and module definitions to fit specific needs.
+
 ## Deduplication Process
 
 The deduplication process is a critical step to ensure efficiency and accuracy:
