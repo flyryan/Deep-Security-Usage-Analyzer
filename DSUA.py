@@ -691,7 +691,14 @@ class SecurityModuleAnalyzer:
             inactive_instances = env_df[env_df[self.MODULE_COLUMNS].sum(axis=1) == 0]
             
             total_instances = len(env_df['Hostname'].unique())
-            module_usage = {col: env_df[col].sum() for col in self.MODULE_COLUMNS}
+            module_usage_counts = {col: set(env_df[env_df[col] > 0]['Hostname']) for col in self.MODULE_COLUMNS}
+            
+            # Calculate module usage percentage
+            module_usage_percentage = {}
+            for module, instances in module_usage_counts.items():
+                unique_instance_count = len(instances)
+                percentage = (unique_instance_count / total_instances) * 100
+                module_usage_percentage[module] = percentage
             
             # Calculate max concurrent instances
             max_concurrent = 0
@@ -706,15 +713,12 @@ class SecurityModuleAnalyzer:
                 'active_instances': len(active_instances['Hostname'].unique()),
                 'inactive_instances': len(inactive_instances['Hostname'].unique()),
                 'total_instances': total_instances,
-                'module_usage': module_usage,
-                'module_usage_percentage': {
-                    col: (usage / total_instances * 100) if total_instances > 0 else 0 
-                    for col, usage in module_usage.items()
-                },
+                'module_usage': {col: len(module_usage_counts[col]) for col in self.MODULE_COLUMNS},
+                'module_usage_percentage': module_usage_percentage,
                 'most_common_module': max(
                     self.MODULE_COLUMNS,
-                    key=lambda col: env_df[col].sum()
-                ) if env_df[self.MODULE_COLUMNS].sum().sum() > 0 else "None",
+                    key=lambda col: len(module_usage_counts[col])
+                ) if sum(len(instances) for instances in module_usage_counts.values()) > 0 else "None",
                 'avg_modules_per_host': env_df[self.MODULE_COLUMNS].sum(axis=1).mean(),
                 'max_concurrent': max_concurrent,
                 'total_utilization_hours': total_hours,
