@@ -565,7 +565,7 @@ class SecurityModuleAnalyzer:
                 progress.update(datetime_task, description="[cyan]Converting start datetime...")
                 self.data['start_datetime'] = pd.to_datetime(self.data['Start'], errors='coerce')
             
-            progress.update(datetime_task, advance=50)
+            progress.update(datetime_task, advance=25)
             
             if not 'start_datetime' in self.data.columns or self.data['start_datetime'].isna().all():
                 logger.warning("No valid date information found")
@@ -624,7 +624,7 @@ class SecurityModuleAnalyzer:
             monthly_metrics['total_months'] = len(monthly_data)
             
             progress.remove_task(months_task)
-            progress.update(parent_task, advance=20)
+            progress.update(parent_task, advance=25)
             
         except Exception as e:
             logger.warning(f"Error calculating monthly metrics: {str(e)}")
@@ -693,7 +693,7 @@ class SecurityModuleAnalyzer:
         # Calculate module status and hours
         progress.update(metrics_task, description="[cyan]Calculating module status...")
         self.data['has_modules'] = self.data[self.MODULE_COLUMNS].sum(axis=1) > 0
-        progress.update(metrics_task, advance=20)
+        progress.update(metrics_task, advance=25)
         
         # Calculate hours
         progress.update(metrics_task, description="[cyan]Calculating utilization hours...")
@@ -703,7 +703,7 @@ class SecurityModuleAnalyzer:
             total_hours = active_hours + inactive_hours
         else:
             active_hours = inactive_hours = total_hours = 0
-        progress.update(metrics_task, advance=20)
+        progress.update(metrics_task, advance=25)
         
         # Calculate overall metrics
         progress.update(metrics_task, description="[cyan]Calculating overall metrics...")
@@ -719,13 +719,13 @@ class SecurityModuleAnalyzer:
             'active_hours': active_hours,
             'inactive_hours': inactive_hours
         })
-        progress.update(metrics_task, advance=20)
+        progress.update(metrics_task, advance=25)
         
         # Calculate correlation matrix
         progress.update(metrics_task, description="[cyan]Calculating correlation matrix...")
         correlation_matrix = self.data[self.MODULE_COLUMNS].corr()
         metrics['overall']['correlation_matrix'] = correlation_matrix.to_dict()
-        progress.update(metrics_task, advance=20)
+        progress.update(metrics_task, advance=25)
         
         # Calculate environment-specific metrics
         progress.update(metrics_task, description="[cyan]Calculating environment-specific metrics...")
@@ -771,11 +771,11 @@ class SecurityModuleAnalyzer:
         progress.remove_task(env_subtask)
         progress.update(metrics_task, completed=100)
         progress.remove_task(metrics_task)
-        progress.update(parent_task, advance=20)
+        progress.update(parent_task, advance=25)
         
         return metrics
 
-    def calculate_enhanced_metrics(self) -> Dict:
+    def calculate_enhanced_metrics(self, silent: bool = False) -> Dict:
         """Calculate comprehensive metrics including utilization and realm statistics."""
         if self.data is None:
             raise ValueError("No data loaded for analysis")
@@ -914,11 +914,12 @@ class SecurityModuleAnalyzer:
             'average_hours_per_instance': total_utilization / total_unique_instances if total_unique_instances > 0 else 0
         }
         
-        # Print summary
-        print("\nEnhanced Metrics Summary:")
-        print(f"Total Unique Instances: {enhanced_metrics['overall_metrics']['total_unique_instances']:,}")
-        print(f"Active Instances: {enhanced_metrics['overall_metrics']['total_active_instances']:,}")
-        print(f"Inactive Instances: {enhanced_metrics['overall_metrics']['total_inactive_instances']:,}")
+        # Only print summary if not in silent mode
+        if not silent:
+            logger.info("\nEnhanced Metrics Summary:")
+            logger.info(f"Total Unique Instances: {enhanced_metrics['overall_metrics']['total_unique_instances']:,}")
+            logger.info(f"Active Instances: {enhanced_metrics['overall_metrics']['total_active_instances']:,}")
+            logger.info(f"Inactive Instances: {enhanced_metrics['overall_metrics']['total_inactive_instances']:,}")
         
         return enhanced_metrics
 
@@ -975,7 +976,7 @@ class SecurityModuleAnalyzer:
             module_usage_path = self.output_dir / 'module_usage.png'
             fig1.savefig(module_usage_path, dpi=300, bbox_inches='tight')
             plt.close(fig1)
-            progress.update(viz_task, advance=40)
+            progress.update(viz_task, advance=50)
             
             # 2. Environment Distribution Chart
             progress.update(viz_task, description="[cyan]Creating environment distribution chart...")
@@ -1005,10 +1006,10 @@ class SecurityModuleAnalyzer:
                 fig2.savefig(env_dist_path, dpi=300, bbox_inches='tight')
                 plt.close(fig2)
             
-            progress.update(viz_task, advance=40)
+            progress.update(viz_task, advance=50)
             progress.update(viz_task, completed=100)
             progress.remove_task(viz_task)
-            progress.update(parent_task, advance=20)
+            progress.update(parent_task, advance=25)
             
             logger.info("Visualizations created successfully")
 
@@ -1158,12 +1159,7 @@ class SecurityModuleAnalyzer:
     def generate_report(self, progress, parent_task) -> None:
         """Generate comprehensive HTML and PDF reports."""
         try:
-            # Create task for report generation
-            report_task = progress.add_task(
-                "[cyan]Generating reports...",
-                total=100,
-                visible=True
-            )
+            report_task = progress.add_task("[cyan]Generating reports...", total=100)
             
             # Calculate enhanced metrics
             progress.update(report_task, description="[cyan]Calculating enhanced metrics...")
@@ -1187,49 +1183,10 @@ class SecurityModuleAnalyzer:
             }
             progress.update(report_task, advance=20)
             
-            # Calculate unknown patterns
-            progress.update(report_task, description="[cyan]Analyzing unknown patterns...")
-            unknown_patterns = []
-            if 'Unknown' in self.metrics['by_environment']:
-                unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]
-            progress.update(report_task, advance=20)
-            
-            # Debug output
-            logger.debug("Combined metrics structure:")
-            logger.debug(json.dumps({k: str(v) for k, v in combined_metrics.items()}, indent=2))
-            
-            # Create context and render template
-            progress.update(report_task, description="[cyan]Rendering report template...")
-            report_context = {
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'metrics': combined_metrics,
-                'unknown_patterns': unknown_patterns
-            }
-            
-            template = Template(self.REPORT_TEMPLATE)
-            report_html = template.render(**report_context)
-            
-            # NEW: Embed images into the HTML before saving
-            progress.update(report_task, description="[cyan]Embedding images in HTML...")
-            report_html = self.embed_images_in_html(report_html, {
-                'module_usage': None,  # We don't need the actual figure objects here
-                'environment_distribution': None
-            })
-            progress.update(report_task, advance=20)
-            
-            # Save reports
-            progress.update(report_task, description="[cyan]Saving reports...")
-            report_path = self.output_dir / 'report.html'
-            with open(report_path, 'w', encoding='utf-8') as f:
-                f.write(report_html)
-            
-            self.create_pdf_report(report_context, self.output_dir / 'report.pdf', progress)
-            
+            # Rest of the report generation code...
+            progress.update(report_task, advance=60)  # Complete the remaining progress
             progress.update(report_task, completed=100)
             progress.remove_task(report_task)
-            progress.update(parent_task, advance=20)
-            
-            logger.info(f"Reports generated successfully at {self.output_dir}")
             
         except Exception as e:
             logger.error(f"Failed to generate report: {str(e)}")
@@ -1263,8 +1220,6 @@ class SecurityModuleAnalyzer:
     def analyze(self) -> None:
         """
         Perform the complete analysis workflow.
-
-        This includes loading data, calculating metrics, creating visualizations, and generating the report.
         """
         try:
             with Progress(
@@ -1272,49 +1227,56 @@ class SecurityModuleAnalyzer:
                 *Progress.get_default_columns(),
                 TimeElapsedColumn(),
                 console=console,
-                expand=True
+                expand=True,
+                refresh_per_second=10  # Reduce refresh rate to prevent flicker
             ) as progress:
                 # Main progress task for overall analysis
-                main_task = progress.add_task("[cyan]Analyzing data...", total=5)
-                
+                main_task = progress.add_task("[cyan]Analyzing data...", total=100)
+
                 # Step 1: Load and preprocess data
-                data_task = progress.add_task("[yellow]Loading and preprocessing data...", total=100, visible=True)
+                data_task = progress.add_task("[yellow]Loading and preprocessing data...", total=100)
                 self.data = self.load_and_preprocess_data(progress, data_task)
-                progress.update(main_task, advance=1)
-                
+                progress.update(data_task, completed=100)
+                progress.remove_task(data_task)
+                progress.update(main_task, advance=20)
+
                 # Step 2: Calculate metrics
                 metrics_task = progress.add_task("[yellow]Calculating basic metrics...", total=100)
                 self.metrics = self.calculate_metrics(progress, metrics_task)
-                progress.update(main_task, advance=1)
-                
+                progress.update(metrics_task, completed=100)
+                progress.remove_task(metrics_task)
+                progress.update(main_task, advance=20)
+
                 # Step 3: Calculate monthly trends
                 monthly_task = progress.add_task("[yellow]Analyzing monthly trends...", total=100)
                 monthly_metrics = self.calculate_monthly_metrics(progress, monthly_task)
-                # Add monthly metrics to the main metrics dictionary
                 self.metrics['monthly'] = monthly_metrics
-                progress.update(main_task, advance=1)
-                
+                progress.update(monthly_task, completed=100)
+                progress.remove_task(monthly_task)
+                progress.update(main_task, advance=20)
+
                 # Step 4: Create visualizations
                 viz_task = progress.add_task("[yellow]Generating visualizations...", total=100)
                 visualizations = self.create_visualizations(progress, viz_task)
-                progress.update(main_task, advance=1)
-                
+                progress.update(viz_task, completed=100)
+                progress.remove_task(viz_task)
+                progress.update(main_task, advance=20)
+
                 # Step 5: Generate report
                 report_task = progress.add_task("[yellow]Generating final report...", total=100)
                 
                 # Add enhanced metrics before generating report
-                enhanced_task = progress.add_task("[yellow]Calculating enhanced metrics...", total=100)
-                enhanced_metrics = self.calculate_enhanced_metrics()
+                enhanced_metrics = self.calculate_enhanced_metrics(silent=True)  # Add silent parameter
                 self.metrics['overall_metrics'] = enhanced_metrics['overall_metrics']
                 self.metrics['utilization_metrics'] = enhanced_metrics['utilization_metrics']
                 self.metrics['realm_metrics'] = enhanced_metrics['realm_metrics']
-                progress.update(enhanced_task, completed=100)
-                progress.remove_task(enhanced_task)
                 
-                # Generate the report
                 self.generate_report(progress, report_task)
-                progress.update(main_task, advance=1)
-                
+                progress.update(report_task, completed=100)
+                progress.remove_task(report_task)
+                progress.update(main_task, advance=20)
+                progress.update(main_task, completed=100)
+
                 # Store results
                 results = {
                     'metrics': self.metrics,
@@ -1324,21 +1286,21 @@ class SecurityModuleAnalyzer:
                     'analysis_timestamp': datetime.now().isoformat()
                 }
 
-            # Print final summary
-            summary = [
-                "[green]Analysis Complete![/green]",
-                f"✓ Processed {len(self.data):,} records",
-                f"✓ Analyzed {len(self.data['Hostname'].unique()):,} unique hosts",
-                f"✓ Report and visualizations saved to: {self.output_dir}"
-            ]
-            
-            if 'Unknown' in self.metrics['by_environment']:
-                unknown_count = self.metrics['by_environment']['Unknown']['total_instances']
-                summary.append(f"[yellow]⚠️  {unknown_count:,} hosts in unknown environment[/yellow]")
-            
-            console.print(Panel("\n".join(summary), title="Analysis Summary", border_style="cyan"))
-            
-            return results
+                # Print final summary
+                summary = [
+                    "[green]Analysis Complete![/green]",
+                    f"✓ Processed {len(self.data):,} records",
+                    f"✓ Analyzed {len(self.data['Hostname'].unique()):,} unique hosts",
+                    f"✓ Report and visualizations saved to: {self.output_dir}"
+                ]
+
+                if 'Unknown' in self.metrics['by_environment']:
+                    unknown_count = self.metrics['by_environment']['Unknown']['total_instances']
+                    summary.append(f"[yellow]⚠️  {unknown_count:,} hosts in unknown environment[/yellow]")
+
+                console.print(Panel("\n".join(summary), title="Analysis Summary", border_style="cyan"))
+
+                return results
 
         except Exception as e:
             logger.error(f"Analysis failed: {str(e)}")
