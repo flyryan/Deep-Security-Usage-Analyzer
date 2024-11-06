@@ -222,10 +222,7 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
 
 - **Module Usage Percentages:**
   - We calculate the percentage of instances using each module by dividing the module usage count by the total number of instances and multiplying by 100.
-  - Formula: 
-    \[
-    \text{Percentage} = \left( \frac{\text{Module Usage Count}}{\text{Total Instances}} \right) \times 100
-    \]
+  - Formula: `Percentage = (Module Usage Count / Total Instances) * 100`
   - Example:
     ```json
     "module_usage_percentage": {
