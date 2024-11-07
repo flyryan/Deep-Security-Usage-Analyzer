@@ -211,13 +211,13 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
 
 ### Metric Calculation Logic
 
-- **Active Instances:**
+- **Activated Instances:**
   - Determined by checking if any security module is active for a host
-  - A host is considered active if the sum of its module values is greater than zero
+  - A host is considered activated if the sum of its module values is greater than zero
   - Example: If AM=1 or WRS=1, the instance is active
 - **Inactive Instances:**
   - Hosts with no active security modules (all module values are 0)
-  - Calculated as: Total Instances - Active Instances
+  - Calculated as: Total Instances - Activated Instances
 
 - **Total Number of Instances per Environment:**
   - We aggregate the total number of instances by summing up the `activated_instances` and `inactive_instances` for each environment.
