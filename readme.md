@@ -62,16 +62,6 @@ DSUA aims to provide a clear understanding of module usage patterns by analyzing
 - **Error Handling:** Robust error handling and logging to ensure smooth execution and easy troubleshooting.
 - **Customizable:** Adjustable parameters for environment patterns and module definitions to fit specific needs.
 
-## Modules
-
-DSUA is organized into the following modules for better maintainability and scalability:
-
-- **logger_setup.py:** Configures logging with custom formatting.
-- **data_loader.py:** Handles loading and preprocessing of data.
-- **metrics_calculator.py:** Calculates core metrics from security module data.
-- **visualization.py:** Creates visualizations for the report.
-- **report_generator.py:** Generates HTML and PDF reports based on the analysis.
-
 ## Deduplication Process
 
 The deduplication process is a critical step to ensure efficiency and accuracy:
