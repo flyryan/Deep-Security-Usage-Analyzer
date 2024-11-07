@@ -27,29 +27,12 @@ DSUA aims to provide a clear understanding of module usage patterns by analyzing
   - seaborn
   - jinja2
   - reportlab
-  
-  ## Installation
 
-  1. **Clone the Repository:**
+Install the necessary packages using:
 
-    ```bash
-    git clone https://github.com/flyryan/Deep-Security-Usage-Analyzer.git
-    cd Deep-Security-Usage-Analyzer
-    ```
-
-  2. **Set Up a Virtual Environment:**
-
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-    ```
-
-  3. **Install the Necessary Packages:**
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
+```bash
+pip install -r requirements.txt
+```
 
 ## Features
 
