@@ -215,31 +215,6 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
   - We aggregate the total number of instances by summing up the `active_instances` and `inactive_instances` for each environment.
   - Example:
 
-    ### Metric Calculation Logic
-
-    The determination of active and inactive instances is based on the status and activity logs of each instance. Here’s how DSUA differentiates between them:
-
-  - **Active Instances:**
-    - Instances that are currently running and providing services.
-    - Identified by checking the latest status logs and ensuring the instance is marked as active.
-    - Instances with recent activity logs indicating ongoing operations.
-
-  - **Inactive Instances:**
-    - Instances that are not currently running or providing services.
-    - Identified by checking the latest status logs and finding the instance marked as inactive or stopped.
-    - Instances with no recent activity logs or logs indicating the instance has been shut down.
-
-    The script processes the status and activity logs to classify each instance accurately. This classification helps in understanding the current utilization and availability of resources.
-
-  - **Total Number of Instances per Environment:**
-    - We aggregate the total number of instances by summing up the `active_instances` and `inactive_instances` for each environment.
-    - Example:
-      ```json
-      "Development": {
-        "active_instances": 6142,
-        "inactive_instances": 106,
-        "total_instances": 6218
-      }
     ```json
     "Development": {
       "active_instances": 6142,
@@ -258,8 +233,7 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
       "DC": 0.0,
       "AC": 4.0,
       "IM": 10057.0,
-     
-        ``` "LI": 8976.0,
+      "LI": 8976.0,
       "FW": 628.0,
       "DPI": 22076.0,
       "SAP": 0.0
