@@ -211,6 +211,10 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
 
 ### Metric Calculation Logic
 
+**Calculating Active vs. Inactive Instances:**
+
+Active instances are determined by identifying records that have recent activity timestamps, indicating they are currently operational and contributing data. Inactive instances are those without recent activity, either because they have been stopped, terminated, or have not reported data within the analysis period. This distinction is based on status indicators and timestamp fields present in the usage data.
+
 - **Total Number of Instances per Environment:**
   - We aggregate the total number of instances by summing up the `active_instances` and `inactive_instances` for each environment.
   - Example:
