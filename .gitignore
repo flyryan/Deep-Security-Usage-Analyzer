@@ -16,3 +16,6 @@
 # Ignore output directory
 /output/
 .DS_Store
+
+# Ignore directories ending with env
+*env/

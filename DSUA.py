@@ -236,8 +236,8 @@ class SecurityModuleAnalyzer:
                     <div class="metric-label">Total Unique Instances</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">{{ metrics.overall.active_instances }}</div>
-                    <div class="metric-label">Active Instances</div>
+                    <div class="metric-value">{{ metrics.overall.activated_instances }}</div>
+                    <div class="metric-label">Activated Instances</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value">{{ metrics.overall.inactive_instances }}</div>
@@ -260,7 +260,7 @@ class SecurityModuleAnalyzer:
                 <tr>
                     <th>Environment</th>
                     <th>Total Hosts</th>
-                    <th>Active Hosts</th>
+                    <th>Activated Hosts</th>
                     <th>Most Used Module</th>
                     <th>Max Concurrent</th>
                     <th>Total Hours</th>
@@ -269,7 +269,7 @@ class SecurityModuleAnalyzer:
                 <tr>
                     <td>{{ env }}</td>
                     <td>{{ data.total_instances }}</td>
-                    <td>{{ data.active_instances }}</td>
+                    <td>{{ data.activated_instances }}</td>
                     <td>{{ data.most_common_module }}</td>
                     <td>{{ data.max_concurrent if data.max_concurrent else 'N/A' }}</td>
                     <td>{{ "%.1f"|format(data.total_utilization_hours) if data.total_utilization_hours != "N/A" else "N/A" }}</td>
@@ -303,7 +303,7 @@ class SecurityModuleAnalyzer:
                 </tr>
                 <tr>
                     <td>Instances Running at Least One Module</td>
-                    <td>{{ "{:,}".format(metrics.overall.active_instances) }}</td>
+                    <td>{{ "{:,}".format(metrics.overall.activated_instances) }}</td>
                 </tr>
                 <tr>
                     <td>Instances Not Running Any Modules</td>
@@ -315,7 +315,7 @@ class SecurityModuleAnalyzer:
                 </tr>
                 <tr>
                     <td>Hours for Instances with Modules</td>
-                    <td>{{ "{:,.1f}".format(metrics.overall.active_hours) }}</td>
+                    <td>{{ "{:,.1f}".format(metrics.overall.activated_hours) }}</td>
                 </tr>
                 <tr>
                     <td>Hours for Instances without Modules</td>
@@ -348,7 +348,7 @@ class SecurityModuleAnalyzer:
             <table>
                 <tr>
                     <th>Month</th>
-                    <th>Active Instances</th>
+                    <th>Activated Instances</th>
                     <th>Max Concurrent</th>
                     <th>Avg Modules/Host</th>
                     <th>Total Hours</th>
@@ -356,7 +356,7 @@ class SecurityModuleAnalyzer:
                 {% for month in metrics.monthly.data %}
                 <tr>
                     <td>{{ month.month }}</td>
-                    <td>{{ month.active_instances }}</td>
+                    <td>{{ month.activated_instances }}</td>
                     <td>{{ month.max_concurrent }}</td>
                     <td>{{ "%.2f"|format(month.avg_modules_per_host) }}</td>
                     <td>{{ "%.1f"|format(month.total_hours) }}</td>
@@ -582,14 +582,14 @@ class SecurityModuleAnalyzer:
                 month_data = self.data[self.data['month'] == month]
                 
                 # Calculate metrics for the month
-                active_instances = len(month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
+                activated_instances = len(month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
                 
                 # Calculate maximum concurrent for the month
                 max_concurrent = self._calculate_max_concurrent(month_data)
                 
                 data = {
                     'month': str(month),
-                    'active_instances': active_instances,
+                    'activated_instances': activated_instances,
                     'max_concurrent': max_concurrent,
                     'avg_modules_per_host': month_data[self.MODULE_COLUMNS].sum(axis=1).mean(),
                     'total_hours': (month_data['Duration (Seconds)'].sum() / 3600) if 'Duration (Seconds)' in month_data.columns else 0
@@ -661,27 +661,27 @@ class SecurityModuleAnalyzer:
         # Calculate module status and hours
         self.data['has_modules'] = self.data[self.MODULE_COLUMNS].sum(axis=1) > 0
         
-        # Calculate hours for active and inactive instances
+        # Calculate hours for activated and inactive instances
         if 'Duration (Seconds)' in self.data.columns:
-            active_hours = (self.data[self.data['has_modules']]['Duration (Seconds)'].sum()) / 3600
+            activated_hours = (self.data[self.data['has_modules']]['Duration (Seconds)'].sum()) / 3600
             inactive_hours = (self.data[~self.data['has_modules']]['Duration (Seconds)'].sum()) / 3600
-            total_hours = active_hours + inactive_hours
+            total_hours = activated_hours + inactive_hours
         else:
-            active_hours = 0
+            activated_hours = 0
             inactive_hours = 0
             total_hours = 0
         
         # Calculate overall metrics first
         total_instances = len(self.data['Hostname'].unique())
-        active_instances = len(self.data[self.data['has_modules']]['Hostname'].unique())
-        inactive_instances = total_instances - active_instances
+        activated_instances = len(self.data[self.data['has_modules']]['Hostname'].unique())
+        inactive_instances = total_instances - activated_instances
         
         metrics['overall'].update({
             'total_instances': total_instances,
-            'active_instances': active_instances,
+            'activated_instances': activated_instances,
             'inactive_instances': inactive_instances,
             'total_hours': total_hours,
-            'active_hours': active_hours,
+            'activated_hours': activated_hours,
             'inactive_hours': inactive_hours
         })
         
@@ -695,7 +695,7 @@ class SecurityModuleAnalyzer:
         
         for env in environments:
             env_df = self.data[self.data['Environment'] == env]
-            active_instances = env_df[env_df[self.MODULE_COLUMNS].sum(axis=1) > 0]
+            activated_instances = env_df[env_df[self.MODULE_COLUMNS].sum(axis=1) > 0]
             inactive_instances = env_df[env_df[self.MODULE_COLUMNS].sum(axis=1) == 0]
             
             total_instances = len(env_df['Hostname'].unique())
@@ -718,7 +718,7 @@ class SecurityModuleAnalyzer:
                 total_hours = 0
             
             metrics['by_environment'][env] = {
-                'active_instances': len(active_instances['Hostname'].unique()),
+                'activated_instances': len(activated_instances['Hostname'].unique()),
                 'inactive_instances': len(inactive_instances['Hostname'].unique()),
                 'total_instances': total_instances,
                 'module_usage': {col: len(module_usage_counts[col]) for col in self.MODULE_COLUMNS},
@@ -734,11 +734,11 @@ class SecurityModuleAnalyzer:
             }
         
         # Calculate overall metrics
-        total_active = len(self.data[self.data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
+        total_activated = len(self.data[self.data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
         total_instances = len(self.data['Hostname'].unique())
         
         # Calculate hours with more detailed breakdown
-        active_hours = 0
+        activated_hours = 0
         inactive_hours = 0
         if 'Duration (Seconds)' in self.data.columns:
             # Add column indicating if instance has any modules
@@ -751,16 +751,16 @@ class SecurityModuleAnalyzer:
                                  'has_modules': 'any'
                              }))
             
-            # Calculate hours for active and inactive instances
-            active_hours = (instance_hours[instance_hours['has_modules']]['Duration (Seconds)'].sum()) / 3600
+            # Calculate hours for activated and inactive instances
+            activated_hours = (instance_hours[instance_hours['has_modules']]['Duration (Seconds)'].sum()) / 3600
             inactive_hours = (instance_hours[~instance_hours['has_modules']]['Duration (Seconds)'].sum()) / 3600
         
         metrics['overall'].update({
-            'active_instances': total_active,
-            'inactive_instances': total_instances - total_active,
+            'activated_instances': total_activated,
+            'inactive_instances': total_instances - total_activated,
             'total_instances': total_instances,
-            'total_hours': active_hours + inactive_hours,
-            'active_hours': active_hours,
+            'total_hours': activated_hours + inactive_hours,
+            'activated_hours': activated_hours,
             'inactive_hours': inactive_hours,
             'module_usage': {col: self.data[col].sum() for col in self.MODULE_COLUMNS},
             'environment_distribution': {
@@ -820,8 +820,8 @@ class SecurityModuleAnalyzer:
             
             # Calculate unique instances and their states
             unique_instances = realm_data['Hostname'].nunique()
-            active_instances = realm_data[has_modules]['Hostname'].nunique()
-            inactive_instances = unique_instances - active_instances
+            activated_instances = realm_data[has_modules]['Hostname'].nunique()
+            inactive_instances = unique_instances - activated_instances
             
             # Calculate maximum concurrent instances
             max_concurrent = 0
@@ -859,7 +859,7 @@ class SecurityModuleAnalyzer:
             
             enhanced_metrics['realm_metrics'][realm] = {
                 'unique_instances': unique_instances,
-                'active_instances': active_instances,
+                'activated_instances': activated_instances,
                 'inactive_instances': inactive_instances,
                 'max_concurrent': max_concurrent,
                 'total_utilization_hours': total_hours
@@ -867,12 +867,12 @@ class SecurityModuleAnalyzer:
         
         # Calculate overall metrics
         total_unique_instances = self.data['Hostname'].nunique()
-        total_active = self.data[self.data[module_columns].sum(axis=1) > 0]['Hostname'].nunique()
+        total_activated = self.data[self.data[module_columns].sum(axis=1) > 0]['Hostname'].nunique()
         
         enhanced_metrics['overall_metrics'] = {
             'total_unique_instances': total_unique_instances,
-            'total_active_instances': total_active,
-            'total_inactive_instances': total_unique_instances - total_active,
+            'total_activated_instances': total_activated,
+            'total_inactive_instances': total_unique_instances - total_activated,
             'max_concurrent_overall': sum(
                 metrics['max_concurrent'] 
                 for metrics in enhanced_metrics['realm_metrics'].values() 
@@ -902,7 +902,7 @@ class SecurityModuleAnalyzer:
         # Suppress Enhanced Metrics Summary output
         # print("\nEnhanced Metrics Summary:")
         # print(f"Total Unique Instances: {enhanced_metrics['overall_metrics']['total_unique_instances']:,}")
-        # print(f"Active Instances: {enhanced_metrics['overall_metrics']['total_active_instances']:,}")
+        # print(f"Activated Instances: {enhanced_metrics['overall_metrics']['total_activated_instances']:,}")
         # print(f"Inactive Instances: {enhanced_metrics['overall_metrics']['total_inactive_instances']:,}")
         
         return enhanced_metrics
@@ -1040,10 +1040,10 @@ class SecurityModuleAnalyzer:
             story.append(Paragraph("Overall Metrics", styles['Heading2']))
             overall_data = [
                 ["Total Unique Instances", f"{context['metrics']['overall']['total_instances']:,}"],
-                ["Active Instances", f"{context['metrics']['overall']['active_instances']:,}"],
+                ["Activated Instances", f"{context['metrics']['overall']['activated_instances']:,}"],
                 ["Inactive Instances", f"{context['metrics']['overall']['inactive_instances']:,}"],
                 ["Total Hours", f"{context['metrics']['overall']['total_hours']:.1f}"],
-                ["Active Hours", f"{context['metrics']['overall']['active_hours']:.1f}"],
+                ["Activated Hours", f"{context['metrics']['overall']['activated_hours']:.1f}"],
                 ["Inactive Hours", f"{context['metrics']['overall']['inactive_hours']:.1f}"]
             ]
             table = Table(overall_data, hAlign='LEFT')
@@ -1061,12 +1061,12 @@ class SecurityModuleAnalyzer:
 
             # Environment Distribution
             story.append(Paragraph("Environment Distribution", styles['Heading2']))
-            env_data = [["Environment", "Total Hosts", "Active Hosts", "Most Used Module", "Max Concurrent", "Total Hours"]]
+            env_data = [["Environment", "Total Hosts", "Activated Hosts", "Most Used Module", "Max Concurrent", "Total Hours"]]
             for env, data in context['metrics']['by_environment'].items():
                 env_data.append([
                     env,
                     f"{data['total_instances']}",
-                    f"{data['active_instances']}",
+                    f"{data['activated_instances']}",
                     data['most_common_module'],
                     f"{data['max_concurrent'] if data['max_concurrent'] else 'N/A'}",
                     f"{data['total_utilization_hours']:.1f}" if data['total_utilization_hours'] != "N/A" else "N/A"
@@ -1102,10 +1102,10 @@ class SecurityModuleAnalyzer:
             stats_data = [
                 ["Metric", "Value"],
                 ["Total Unique Instances", f"{context['metrics']['overall']['total_instances']:,}"],
-                ["Instances Running at Least One Module", f"{context['metrics']['overall']['active_instances']:,}"],
+                ["Instances Running at Least One Module", f"{context['metrics']['overall']['activated_instances']:,}"],
                 ["Instances Not Running Any Modules", f"{context['metrics']['overall']['inactive_instances']:,}"],
                 ["Total Hours", f"{context['metrics']['overall']['total_hours']:.1f}"],
-                ["Hours for Instances with Modules", f"{context['metrics']['overall']['active_hours']:.1f}"],
+                ["Hours for Instances with Modules", f"{context['metrics']['overall']['activated_hours']:.1f}"],
                 ["Hours for Instances without Modules", f"{context['metrics']['overall']['inactive_hours']:.1f}"],
                 ["Max Concurrent Usage", f"{context['metrics']['overall_metrics']['max_concurrent_overall']:,}"],
                 ["Unknown Environment Instances", f"{context['metrics']['by_environment'].get('Unknown', {}).get('total_instances', 0):,}"]
@@ -1126,12 +1126,12 @@ class SecurityModuleAnalyzer:
             # Monthly Data Analysis
             story.append(Paragraph("Monthly Data Analysis", styles['Heading2']))
             monthly_data = [
-                ["Month", "Active Instances", "Max Concurrent", "Avg Modules/Host", "Total Hours"]
+                ["Month", "Activated Instances", "Max Concurrent", "Avg Modules/Host", "Total Hours"]
             ]
             for month in context['metrics']['monthly']['data']:
                 monthly_data.append([
                     month['month'],
-                    month['active_instances'],
+                    month['activated_instances'],
                     month['max_concurrent'],
                     f"{month['avg_modules_per_host']:.2f}",
                     f"{month['total_hours']:.1f}"
