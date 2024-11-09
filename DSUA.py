@@ -994,9 +994,9 @@ class SecurityModuleAnalyzer:
         Returns:
             str: The HTML content with embedded images.
         """
-        for name, fig in visualizations.items():
+        for name, img in visualizations.items():
             buffer = BytesIO()
-            fig.savefig(buffer, format='png', bbox_inches='tight')
+            plt.imsave(buffer, img, format='png')
             buffer.seek(0)
             img_str = base64.b64encode(buffer.read()).decode('utf-8')
             img_tag = f'data:image/png;base64,{img_str}'
@@ -1229,10 +1229,12 @@ class SecurityModuleAnalyzer:
             template = Template(self.REPORT_TEMPLATE)
             report_html = template.render(**serializable_context)
             
-            # Stage 7: Create visualizations
-            print("  ↳ Creating visualizations...")
-            visualizations = self.create_visualizations()
-            # Embed images in HTML
+            # Stage 7: Embed existing images in HTML
+            print("  ↳ Embedding images in HTML...")
+            visualizations = {
+                'module_usage': plt.imread(self.output_dir / 'module_usage.png'),
+                'environment_distribution': plt.imread(self.output_dir / 'environment_distribution.png')
+            }
             report_html = self.embed_images_in_html(report_html, visualizations)
             
             # Stage 8: Save HTML Report
@@ -1310,9 +1312,12 @@ class SecurityModuleAnalyzer:
             update_progress("Generating final report...")
             self.generate_report()
 
+            # Convert metrics to serializable types
+            serializable_metrics = self._convert_to_serializable(self.metrics)
+
             # Save metrics to JSON
             with open(self.output_dir / 'metrics.json', 'w') as json_file:
-                json.dump(self.metrics, json_file, indent=4)
+                json.dump(serializable_metrics, json_file, indent=4)
 
             # Single summary at the end
             results = {
