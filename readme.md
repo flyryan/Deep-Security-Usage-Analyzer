@@ -27,6 +27,7 @@ DSUA aims to provide a clear understanding of module usage patterns by analyzing
   - seaborn
   - jinja2
   - reportlab
+  - tqdm
 
 Install the necessary packages using:
 
