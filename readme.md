@@ -19,7 +19,7 @@ DSUA aims to provide a clear understanding of module usage patterns by analyzing
 
 ## Prerequisites
 
-- Python 3.7 or higher
+- Python 3.7 - 3.11 (some dependencies currently don't support 3.12)
 - Required Python packages:
   - pandas
   - numpy
@@ -65,6 +65,7 @@ By performing file deduplication first using `dedupe.py`, you can expedite the a
 1. **Prepare Data:**
    - Place all usage data files (`.csv`, `.xlsx`, or `.xls`) exported from Deep Security into the input directory.
    - Ensure the input directory contains only the files you wish to analyze.
+   - *Optional:* Use filename parsing to aid in environment classification, ensuring entries are accurately categorized.
 
 2. **Run File Deduplication (Optional but Recommended):**
 
@@ -201,13 +202,19 @@ The DSUA script performs a comprehensive analysis of Trend Micro Deep Security m
   - The script captures and logs exceptions without terminating unexpectedly.
   - Provides informative messages to facilitate troubleshooting.
 
-### 9. Configuration and Customization
+### 9. Filename Parsing
 
-- **Adjustable Parameters:**
-  - **Environment Patterns:** Can be modified to match specific naming conventions.
-  - **Module Definitions:** Ability to update which modules are analyzed.
-- **Usage Instructions:**
-  - Parameters can be set via command-line arguments or a configuration file.
+- **Purpose:** Enhance environment classification by extracting environment-specific information directly from filenames.
+- **Functionality:**
+  - The script now includes a parsing mechanism that analyzes filenames to identify and infer the source environment of each data file.
+  - This allows for more accurate classification when hostname and IP patterns alone are insufficient.
+- **Implementation:**
+  - Filenames are scanned for predefined patterns or identifiers that correspond to specific environments (e.g., `prod`, `dev`, `test`).
+  - The extracted information is used to tag data entries with their respective environments during the data preprocessing stage.
+- **Benefits:**
+  - Improves the accuracy of environment classification.
+  - Reduces manual intervention by automating environment identification based on file naming conventions.
+  - Facilitates better organization and segregation of data based on environments.
 
 ### Metric Calculation Logic
 

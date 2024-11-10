@@ -419,16 +419,20 @@ class SecurityModuleAnalyzer:
         logger.info(f"Initialized Trend Micro Deep Security Usage Analyzer with input directory: {self.directory}")
         logger.info(f"Output will be saved to: {self.output_dir}")
 
-    def classify_environment(self, hostname: str) -> str:
+    def classify_environment(self, hostname: str, source_env: Optional[str] = None) -> str:
         """
         Classify the environment of a given hostname based on predefined patterns.
 
         Parameters:
             hostname (str): The hostname to classify.
+            source_env (Optional[str]): The environment inferred from the filename.
 
         Returns:
             str: The classified environment name.
         """
+        if source_env:
+            return source_env
+
         if pd.isna(hostname):
             return 'Unknown'
             
@@ -505,6 +509,20 @@ class SecurityModuleAnalyzer:
                         df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
                     if 'Stop' in df.columns:
                         df['Stop'] = pd.to_datetime(df['Stop'], errors='coerce')
+                    
+                    # Extract environment from filename
+                    env = None
+                    if re.search(r'\bDEV\b', file.name, re.IGNORECASE):
+                        env = 'Development'
+                    elif re.search(r'\bPROD\b', file.name, re.IGNORECASE):
+                        env = 'Production'
+                    elif re.search(r'\bTEST\b', file.name, re.IGNORECASE):
+                        env = 'Test'
+                    elif re.search(r'\bINT\b', file.name, re.IGNORECASE):
+                        env = 'Integration'
+                    
+                    # Add 'Source_Environment' column
+                    df['Source_Environment'] = env
                     
                     dfs.append(df)
                     
@@ -640,18 +658,26 @@ class SecurityModuleAnalyzer:
         
         print("\nClassifying environments and calculating metrics...")
         total_records = len(self.data)
-        
-        # Add environment classification with progress tracking
-        def classify_with_progress(hostname):
-            classify_with_progress.count += 1
-            if classify_with_progress.count % 9 == 0:
-                progress = (classify_with_progress.count / total_records) * 100
-                print(f"\rProgress: {progress:.1f}% ({classify_with_progress.count:,}/{total_records:,} records)", end='')
-            return self.classify_environment(hostname)
-        
-        classify_with_progress.count = 0
-        self.data['Environment'] = self.data['Hostname'].apply(classify_with_progress)
-        
+        classify_progress = 0
+
+        # Initialize the 'Environment' column
+        self.data['Environment'] = 'Unknown'
+
+        for idx, row in self.data.iterrows():
+            env = self.classify_environment(row['Hostname'], row.get('Source_Environment'))
+            self.data.at[idx, 'Environment'] = env
+
+            classify_progress += 1
+            if classify_progress % 9 == 0 or classify_progress == total_records:
+                percentage = (classify_progress / total_records) * 100
+                sys.stdout.write(f"\rProgress: {percentage:.1f}% ({classify_progress:,}/{total_records:,} records)")
+                sys.stdout.flush()
+
+        print()  # Move to the next line after progress completion
+
+        environments = sorted(self.data['Environment'].unique())
+        print(f"Calculating metrics for {len(environments)} environments...")
+
         metrics = {
             'by_environment': {},
             'overall': {},
