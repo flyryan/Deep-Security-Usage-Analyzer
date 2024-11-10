@@ -19,7 +19,7 @@ DSUA aims to provide a clear understanding of module usage patterns by analyzing
 
 ## Prerequisites
 
-- Python 3.7 - 3.11 (some dependencies currently don't support 3.12)
+- Python 3.7 - 3.12 (some dependencies currently don't support 3.13)
 - Required Python packages:
   - pandas
   - numpy

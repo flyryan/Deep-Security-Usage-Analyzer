@@ -24,6 +24,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 import re  # Add this import at the top of the file if not already present
+from tqdm import tqdm  # Add this import at the top of the file if not already present
 
 # Custom logging formatter with colors and symbols
 class ColoredFormatter(logging.Formatter):
@@ -418,6 +419,7 @@ class SecurityModuleAnalyzer:
         
         logger.info(f"Initialized Trend Micro Deep Security Usage Analyzer with input directory: {self.directory}")
         logger.info(f"Output will be saved to: {self.output_dir}")
+        tqdm.pandas()  # Initialize tqdm for pandas
 
     def classify_environment(self, hostname: str, source_env: Optional[str] = None) -> str:
         """
@@ -512,14 +514,24 @@ class SecurityModuleAnalyzer:
                     
                     # Extract environment from filename
                     env = None
-                    if re.search(r'\bDEV\b', file.name, re.IGNORECASE):
+                    filename = file.name.lower()
+                    if re.search(r'(dev|development)', filename):
                         env = 'Development'
-                    elif re.search(r'\bPROD\b', file.name, re.IGNORECASE):
+                    elif re.search(r'(prod|production)', filename):
                         env = 'Production'
-                    elif re.search(r'\bTEST\b', file.name, re.IGNORECASE):
+                    elif re.search(r'(test|qa|tst)', filename):
                         env = 'Test'
-                    elif re.search(r'\bINT\b', file.name, re.IGNORECASE):
+                    elif re.search(r'(int|integration)', filename):
                         env = 'Integration'
+                    elif re.search(r'(stage|staging)', filename):
+                        env = 'Staging'
+                    elif re.search(r'(uat|acceptance)', filename):
+                        env = 'UAT'
+                    elif re.search(r'(dr|disaster|recovery)', filename):
+                        env = 'DR'
+
+                    # Debug logging to confirm environment extraction
+                    logger.debug(f"File '{file.name}' assigned to environment '{env}'")
                     
                     # Add 'Source_Environment' column
                     df['Source_Environment'] = env
@@ -531,6 +543,12 @@ class SecurityModuleAnalyzer:
         
         print("\n\nCombining and cleaning data...")
         combined_df = pd.concat(dfs, ignore_index=True)
+        
+        # Add progress meter for environment classification
+        combined_df['Environment'] = combined_df.progress_apply(
+            lambda row: self.classify_environment(row['Hostname'], row['Source_Environment']),
+            axis=1
+        )
         
         # Remove duplicates
         original_len = len(combined_df)
