@@ -24,6 +24,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 import re  # Add this import at the top of the file if not already present
+from tqdm import tqdm  # Add this import at the top of the file if not already present
 
 # Custom logging formatter with colors and symbols
 class ColoredFormatter(logging.Formatter):
@@ -418,6 +419,7 @@ class SecurityModuleAnalyzer:
         
         logger.info(f"Initialized Trend Micro Deep Security Usage Analyzer with input directory: {self.directory}")
         logger.info(f"Output will be saved to: {self.output_dir}")
+        tqdm.pandas()  # Initialize tqdm for pandas
 
     def classify_environment(self, hostname: str, source_env: Optional[str] = None) -> str:
         """
@@ -512,14 +514,24 @@ class SecurityModuleAnalyzer:
                     
                     # Extract environment from filename
                     env = None
-                    if re.search(r'\bDEV\b', file.name, re.IGNORECASE):
+                    filename = file.name.lower()
+                    if re.search(r'(dev|development)', filename):
                         env = 'Development'
-                    elif re.search(r'\bPROD\b', file.name, re.IGNORECASE):
+                    elif re.search(r'(prod|production)', filename):
                         env = 'Production'
-                    elif re.search(r'\bTEST\b', file.name, re.IGNORECASE):
+                    elif re.search(r'(test|qa|tst)', filename):
                         env = 'Test'
-                    elif re.search(r'\bINT\b', file.name, re.IGNORECASE):
+                    elif re.search(r'(int|integration)', filename):
                         env = 'Integration'
+                    elif re.search(r'(stage|staging)', filename):
+                        env = 'Staging'
+                    elif re.search(r'(uat|acceptance)', filename):
+                        env = 'UAT'
+                    elif re.search(r'(dr|disaster|recovery)', filename):
+                        env = 'DR'
+
+                    # Debug logging to confirm environment extraction
+                    logger.debug(f"File '{file.name}' assigned to environment '{env}'")
                     
                     # Add 'Source_Environment' column
                     df['Source_Environment'] = env
@@ -529,8 +541,14 @@ class SecurityModuleAnalyzer:
                 except Exception as e:
                     print(f"\n⚠️  Error processing {file.name}: {str(e)}")
         
-        print("\n\nCombining and cleaning data...")
+        print("\n\nCombining, classifying, and cleaning data...")
         combined_df = pd.concat(dfs, ignore_index=True)
+        
+        # Add progress meter for environment classification
+        combined_df['Environment'] = combined_df.progress_apply(
+            lambda row: self.classify_environment(row['Hostname'], row['Source_Environment']),
+            axis=1
+        )
         
         # Remove duplicates
         original_len = len(combined_df)
@@ -656,28 +674,9 @@ class SecurityModuleAnalyzer:
         if self.data is None:
             raise ValueError("No data loaded for analysis")
         
-        print("\nClassifying environments and calculating metrics...")
-        total_records = len(self.data)
-        classify_progress = 0
-
-        # Initialize the 'Environment' column
-        self.data['Environment'] = 'Unknown'
-
-        for idx, row in self.data.iterrows():
-            env = self.classify_environment(row['Hostname'], row.get('Source_Environment'))
-            self.data.at[idx, 'Environment'] = env
-
-            classify_progress += 1
-            if classify_progress % 9 == 0 or classify_progress == total_records:
-                percentage = (classify_progress / total_records) * 100
-                sys.stdout.write(f"\rProgress: {percentage:.1f}% ({classify_progress:,}/{total_records:,} records)")
-                sys.stdout.flush()
-
-        print()  # Move to the next line after progress completion
-
         environments = sorted(self.data['Environment'].unique())
         print(f"Calculating metrics for {len(environments)} environments...")
-
+        
         metrics = {
             'by_environment': {},
             'overall': {},
@@ -716,8 +715,6 @@ class SecurityModuleAnalyzer:
         metrics['overall']['correlation_matrix'] = correlation_matrix.to_dict()
         
         # Calculate metrics for each environment
-        environments = sorted(self.data['Environment'].unique())
-        print(f"\nCalculating metrics for {len(environments)} environments...")
         
         for env in environments:
             env_df = self.data[self.data['Environment'] == env]
