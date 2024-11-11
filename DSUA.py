@@ -233,23 +233,23 @@ class SecurityModuleAnalyzer:
             <h2>Overall Metrics</h2>
             <div class="grid">
                 <div class="metric-card">
-                    <div class="metric-value">{{ metrics.overall.total_instances }}</div>
+                    <div class="metric-value">{{ metrics.overall.total_instances | default(0) }}</div>
                     <div class="metric-label">Total Unique Instances</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">{{ metrics.overall.activated_instances }}</div>
+                    <div class="metric-value">{{ metrics.overall.activated_instances | default(0) }}</div>
                     <div class="metric-label">Activated Instances</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">{{ metrics.overall.inactive_instances }}</div>
+                    <div class="metric-value">{{ metrics.overall.inactive_instances | default(0) }}</div>
                     <div class="metric-label">Inactive Instances</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">{{ metrics.overall.total_hours | round(1) }}</div>
+                    <div class="metric-value">{{ metrics.overall.total_hours | default(0.0) | round(1) }}</div>
                     <div class="metric-label">Total Hours</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">{{ metrics.overall_metrics.max_concurrent_overall }}</div>
+                    <div class="metric-value">{{ metrics.overall_metrics.max_concurrent_overall | default(0) }}</div>
                     <div class="metric-label">Max Concurrent Overall</div>
                 </div>
             </div>
@@ -272,8 +272,14 @@ class SecurityModuleAnalyzer:
                     <td>{{ data.total_instances }}</td>
                     <td>{{ data.activated_instances }}</td>
                     <td>{{ data.most_common_module }}</td>
-                    <td>{{ data.max_concurrent if data.max_concurrent else 'N/A' }}</td>
-                    <td>{{ "%.1f"|format(data.total_utilization_hours) if data.total_utilization_hours != "N/A" else "N/A" }}</td>
+                    <td>{{ data.max_concurrent if data.max_concurrent else 'None' }}</td>
+                    <td>
+                        {% if data.total_utilization_hours is defined and data.total_utilization_hours != 'N/A' %}
+                            {{ "%.1f"|format(data.total_utilization_hours) }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </table>
@@ -354,28 +360,22 @@ class SecurityModuleAnalyzer:
                     <th>Avg Modules/Host</th>
                     <th>Total Hours</th>
                 </tr>
-                {% for month in metrics.monthly.data %}
-                <tr>
-                    <td>{{ month.month }}</td>
-                    <td>{{ month.activated_instances }}</td>
-                    <td>{{ month.max_concurrent }}</td>
-                    <td>{{ "%.2f"|format(month.avg_modules_per_host) }}</td>
-                    <td>{{ "%.1f"|format(month.total_hours) }}</td>
-                </tr>
-                {% endfor %}
+                {% if metrics.monthly and metrics.monthly.data %}
+                    {% for month in metrics.monthly.data %}
+                    <tr>
+                        <td>{{ month.month | default('None') }}</td>
+                        <td>{{ month.activated_instances | default(0) }}</td>
+                        <td>{{ month.max_concurrent | default(0) }}</td>
+                        <td>{{ "%.2f"|format(month.avg_modules_per_host | default(0.0)) }}</td>
+                        <td>{{ "%.1f"|format(month.total_hours | default(0.0)) }}</td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="5">No monthly data available</td>
+                    </tr>
+                {% endif %}
             </table>
-
-            {% if metrics.monthly.data_gaps %}
-            <div class="highlight">
-                <h3>Data Gaps Detected</h3>
-                <p>The following periods have missing or incomplete data:</p>
-                <ul>
-                {% for gap in metrics.monthly.data_gaps %}
-                    <li>{{ gap }}</li>
-                {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
         </div>
 
         {% if metrics.by_environment.Unknown and metrics.by_environment.Unknown.total_instances > 0 %}
@@ -417,8 +417,8 @@ class SecurityModuleAnalyzer:
         if not input_files:
             raise ValueError(f"No valid input files found in {self.directory}")
         
-        logger.info(f"Initialized Trend Micro Deep Security Usage Analyzer with input directory: {self.directory}")
-        logger.info(f"Output will be saved to: {self.output_dir}")
+        logger.info(f" Initialized Trend Micro Deep Security Usage Analyzer with input directory: {self.directory}")
+        logger.info(f" Output will be saved to: {self.output_dir}")
         tqdm.pandas()  # Initialize tqdm for pandas
 
     def classify_environment(self, hostname: str, source_env: Optional[str] = None) -> str:
@@ -541,7 +541,7 @@ class SecurityModuleAnalyzer:
                 except Exception as e:
                     print(f"\n⚠️  Error processing {file.name}: {str(e)}")
         
-        print("\n\nCombining, classifying, and cleaning data...")
+        print("\nCombining, classifying, and cleaning data...")
         combined_df = pd.concat(dfs, ignore_index=True)
         
         # Add progress meter for environment classification
@@ -642,7 +642,7 @@ class SecurityModuleAnalyzer:
             logger.warning(f"Error calculating monthly metrics: {str(e)}")
             return monthly_metrics
 
-    def _calculate_max_concurrent(self, df: pd.DataFrame) -> int:
+    def _calculate_max_concurrent(self, df: pd.DataFrame, show_progress: bool = False) -> int:
         """
         Calculate true max concurrent instances by considering overlapping time periods
         and ensuring each instance is only counted once.
@@ -650,9 +650,19 @@ class SecurityModuleAnalyzer:
         max_concurrent = 0
         try:
             if 'stop_datetime' in df.columns:
+                # Get unique hostnames
+                unique_hostnames = df['Hostname'].unique()
+                
+                # Create iterator with or without progress bar
+                hostname_iterator = tqdm(
+                    unique_hostnames,
+                    desc="    Processing instances",
+                    ncols=100
+                ) if show_progress else unique_hostnames
+                
                 # Group by hostname to handle multiple records per instance
                 timeline = []
-                for hostname in df['Hostname'].unique():
+                for hostname in hostname_iterator:
                     host_data = df[df['Hostname'] == hostname]
                     
                     # Get the earliest start and latest stop for each instance
@@ -808,17 +818,51 @@ class SecurityModuleAnalyzer:
         
         return metrics
     
-    def calculate_overall_max_concurrent(self, df: pd.DataFrame) -> int:
-            """Calculate the true overall max concurrent instances."""
-            return self._calculate_max_concurrent(df)
+    def calculate_overall_max_concurrent(self, df: pd.DataFrame, progress_bar=None) -> int:
+        """Calculate the true overall max concurrent instances."""
+        max_concurrent = 0
+        try:
+            if 'stop_datetime' in df.columns:
+                unique_hostnames = df['Hostname'].unique()
+                timeline = []
+                
+                # Iterate over hostnames directly, don't use progress_bar as iterator
+                for hostname in unique_hostnames:
+                    host_data = df[df['Hostname'] == hostname]
+                    start = host_data['start_datetime'].min()
+                    stop = host_data['stop_datetime'].max()
+                    
+                    if pd.notna(start) and pd.notna(stop):
+                        timeline.append((start, 1))
+                        timeline.append((stop, -1))
+                    
+                    if progress_bar is not None:
+                        progress_bar.update(1)
+                
+                if timeline:
+                    if progress_bar is not None:
+                        progress_bar.set_description("      Calculating concurrent usage")
+                    timeline.sort(key=lambda x: x[0])
+                    current_count = 0
+                    for _, count_change in timeline:
+                        current_count += count_change
+                        max_concurrent = max(max_concurrent, current_count)
+        
+        except Exception as e:
+            logger.warning(f"Error calculating max concurrent: {str(e)}")
+        
+        return max_concurrent
 
     def calculate_enhanced_metrics(self) -> Dict:
         """Calculate comprehensive metrics including utilization and realm statistics."""
         if self.data is None:
             raise ValueError("No data loaded for analysis")
         
+        print("\nCalculating enhanced metrics...")
+        
         # Convert datetime columns with proper error handling
         try:
+            print("  ↳ Processing datetime columns...")
             if 'Start Date' in self.data.columns and 'Start Time' in self.data.columns:
                 # Convert date and time separately then combine
                 self.data['start_datetime'] = pd.to_datetime(
@@ -850,76 +894,105 @@ class SecurityModuleAnalyzer:
         
         # Get all computer groups (realms)
         realms = self.data['Computer Group'].fillna('Unknown').unique()
+        total_realms = len(realms)
+        print(f"  ↳ Processing {total_realms} realms...")
         
-        # Calculate metrics for each realm
-        for realm in realms:
-            realm_data = self.data[self.data['Computer Group'].fillna('Unknown') == realm]
-            
-            # Calculate module usage
-            module_columns = ['AM', 'WRS', 'DC', 'AC', 'IM', 'LI', 'FW', 'DPI', 'SAP']
-            has_modules = realm_data[module_columns].sum(axis=1) > 0
-            
-            # Calculate unique instances and their states
-            unique_instances = realm_data['Hostname'].nunique()
-            activated_instances = realm_data[has_modules]['Hostname'].nunique()
-            inactive_instances = unique_instances - activated_instances
-            
-            # Calculate maximum concurrent instances
-            max_concurrent = 0
-            try:
-                if 'start_datetime' in realm_data.columns and not realm_data['start_datetime'].isna().all():
-                    # Create timeline of instance counts
-                    timeline = []
-                    for _, row in realm_data.iterrows():
-                        if has_modules[row.name] and pd.notna(row['start_datetime']) and pd.notna(row['stop_datetime']):
-                            timeline.append((row['start_datetime'], 1))
-                            timeline.append((row['stop_datetime'], -1))
+        # Main progress bar for realms
+        with tqdm(total=total_realms, desc="    Processing realms", ncols=100, position=0, leave=True) as pbar:
+            for realm in realms:
+                # Get data for this realm
+                realm_data = self.data[self.data['Computer Group'].fillna('Unknown') == realm]
+                
+                # Update description with current realm
+                display_realm = realm[:40] + "..." if len(realm) > 43 else realm
+                pbar.set_description(f"    Processing {display_realm}")
+                
+                try:
+                    # Calculate module usage
+                    module_columns = ['AM', 'WRS', 'DC', 'AC', 'IM', 'LI', 'FW', 'DPI', 'SAP']
+                    has_modules = realm_data[module_columns].sum(axis=1) > 0
                     
-                    if timeline:
-                        timeline.sort(key=lambda x: x[0])
-                        current_count = 0
-                        for _, count_change in timeline:
-                            current_count += count_change
-                            max_concurrent = max(max_concurrent, current_count)
-            except Exception as e:
-                logger.warning(f"Error calculating concurrent instances for realm {realm}: {str(e)}")
-                max_concurrent = "N/A"
-            
-            # Calculate total utilization hours
-            total_hours = 0
-            try:
-                if 'Duration (Seconds)' in realm_data.columns:
-                    total_hours = realm_data[has_modules]['Duration (Seconds)'].sum() / 3600
-                elif 'stop_datetime' in realm_data.columns and not realm_data['stop_datetime'].isna().all():
-                    # Calculate duration from datetime fields
-                    duration = (realm_data['stop_datetime'] - realm_data['start_datetime'])
-                    total_hours = duration[has_modules].dt.total_seconds().sum() / 3600
-            except Exception as e:
-                logger.warning(f"Error calculating utilization hours for realm {realm}: {str(e)}")
-                total_hours = "N/A"
-            
-            enhanced_metrics['realm_metrics'][realm] = {
-                'unique_instances': unique_instances,
-                'activated_instances': activated_instances,
-                'inactive_instances': inactive_instances,
-                'max_concurrent': max_concurrent,
-                'total_utilization_hours': total_hours
-            }
-        
-        # Calculate overall metrics
-        total_unique_instances = self.data['Hostname'].nunique()
-        total_activated = self.data[self.data[module_columns].sum(axis=1) > 0]['Hostname'].nunique()
-        
-        enhanced_metrics['overall_metrics'] = {
-            'total_unique_instances': total_unique_instances,
-            'total_activated_instances': total_activated,
-            'total_inactive_instances': total_unique_instances - total_activated,
-            'max_concurrent_overall': self.calculate_overall_max_concurrent(self.data)
-        }
-        
+                    # Calculate unique instances
+                    unique_instances = realm_data['Hostname'].nunique()
+                    activated_instances = realm_data[has_modules]['Hostname'].nunique()
+                    inactive_instances = unique_instances - activated_instances
+                    
+                    # Calculate maximum concurrent instances with nested progress bar for large datasets
+                    max_concurrent = 0
+                    if 'start_datetime' in realm_data.columns and not realm_data['start_datetime'].isna().all():
+                        unique_hostnames = realm_data['Hostname'].unique()
+                        
+                        if len(unique_hostnames) > 1000:
+                            with tqdm(total=len(unique_hostnames), desc="      Building timeline", 
+                                    ncols=100, position=1, leave=False) as timeline_pbar:
+                                timeline = []
+                                for hostname in unique_hostnames:
+                                    host_data = realm_data[realm_data['Hostname'] == hostname]
+                                    start = host_data['start_datetime'].min()
+                                    stop = host_data['stop_datetime'].max()
+                                    
+                                    if pd.notna(start) and pd.notna(stop):
+                                        timeline.append((start, 1))
+                                        timeline.append((stop, -1))
+                                    timeline_pbar.update(1)
+                                
+                                if timeline:
+                                    timeline.sort(key=lambda x: x[0])
+                                    current_count = 0
+                                    for _, count_change in timeline:
+                                        current_count += count_change
+                                        max_concurrent = max(max_concurrent, current_count)
+                        else:
+                            # Process without progress bar for smaller datasets
+                            timeline = []
+                            for hostname in unique_hostnames:
+                                host_data = realm_data[realm_data['Hostname'] == hostname]
+                                start = host_data['start_datetime'].min()
+                                stop = host_data['stop_datetime'].max()
+                                
+                                if pd.notna(start) and pd.notna(stop):
+                                    timeline.append((start, 1))
+                                    timeline.append((stop, -1))
+                            
+                            if timeline:
+                                timeline.sort(key=lambda x: x[0])
+                                current_count = 0
+                                for _, count_change in timeline:
+                                    current_count += count_change
+                                    max_concurrent = max(max_concurrent, current_count)
+                    
+                    # Update metrics
+                    enhanced_metrics['realm_metrics'][realm] = {
+                        'unique_instances': unique_instances,
+                        'activated_instances': activated_instances,
+                        'inactive_instances': inactive_instances,
+                        'max_concurrent': max_concurrent,
+                        'total_utilization_hours': (
+                            realm_data[has_modules]['Duration (Seconds)'].sum() / 3600
+                            if 'Duration (Seconds)' in realm_data.columns
+                            else 0
+                        )
+                    }
+                    
+                except Exception as e:
+                    logger.warning(f"Error processing realm {realm}: {str(e)}")
+                    enhanced_metrics['realm_metrics'][realm] = {
+                        'unique_instances': 0,
+                        'activated_instances': 0,
+                        'inactive_instances': 0,
+                        'max_concurrent': 0,
+                        'total_utilization_hours': 0
+                    }
+                
+                pbar.update(1)
+
+        print("  ↳ Calculating utilization metrics...")
         # Calculate utilization metrics
         total_utilization = 0
         try:
+            # Calculate total unique instances first
+            total_unique_instances = self.data['Hostname'].nunique()
+            
             if 'Duration (Seconds)' in self.data.columns:
                 # Group by hostname and take max duration to avoid double counting
                 total_utilization = self.data.groupby('Hostname')['Duration (Seconds)'].max().sum() / 3600
@@ -930,18 +1003,60 @@ class SecurityModuleAnalyzer:
         except Exception as e:
             logger.warning(f"Error calculating total utilization: {str(e)}")
             total_utilization = 0
-        
+            total_unique_instances = 0
+
         enhanced_metrics['utilization_metrics'] = {
             'total_hours': total_utilization,
             'average_hours_per_instance': total_utilization / total_unique_instances if total_unique_instances > 0 else 0
         }
         
-        # Suppress Enhanced Metrics Summary output
-        # print("\nEnhanced Metrics Summary:")
-        # print(f"Total Unique Instances: {enhanced_metrics['overall_metrics']['total_unique_instances']:,}")
-        # print(f"Activated Instances: {enhanced_metrics['overall_metrics']['total_activated_instances']:,}")
-        # print(f"Inactive Instances: {enhanced_metrics['overall_metrics']['total_inactive_instances']:,}")
-        
+        print("  ↳ Calculating overall metrics...")
+        try:
+            # Create a progress bar for overall metrics calculation
+            metrics_steps = ['Max Concurrent', 'Instance Counts', 'Module Status']
+            with tqdm(total=len(metrics_steps), desc="    Processing metrics", ncols=100, position=0, leave=True) as metrics_pbar:
+                # Calculate max concurrent overall with nested progress
+                metrics_pbar.set_description("    Calculating max concurrent")
+                unique_hostnames = self.data['Hostname'].unique()
+                
+                if len(unique_hostnames) > 1000:
+                    with tqdm(total=len(unique_hostnames), desc="      Processing instances", 
+                            ncols=100, position=1, leave=False) as instance_pbar:
+                        overall_max_concurrent = self.calculate_overall_max_concurrent(
+                            self.data, 
+                            progress_bar=instance_pbar
+                        )
+                else:
+                    overall_max_concurrent = self.calculate_overall_max_concurrent(self.data)
+                metrics_pbar.update(1)
+
+                # Calculate instance counts
+                metrics_pbar.set_description("    Calculating instance counts")
+                total_unique_instances = self.data['Hostname'].nunique()
+                total_activated_instances = self.data[self.data['has_modules']]['Hostname'].nunique()
+                total_inactive_instances = total_unique_instances - total_activated_instances
+                metrics_pbar.update(1)
+
+                # Calculate module status
+                metrics_pbar.set_description("    Processing module status")
+                enhanced_metrics['overall_metrics'] = {
+                    'max_concurrent_overall': overall_max_concurrent,
+                    'total_unique_instances': total_unique_instances,
+                    'total_activated_instances': total_activated_instances,
+                    'total_inactive_instances': total_inactive_instances
+                }
+                metrics_pbar.update(1)
+
+        except Exception as e:
+            logger.warning(f"Error calculating overall metrics: {str(e)}")
+            enhanced_metrics['overall_metrics'] = {
+                'max_concurrent_overall': 0,
+                'total_unique_instances': 0,
+                'total_activated_instances': 0,
+                'total_inactive_instances': 0
+            }
+
+        print("  ↳ Enhanced metrics calculation complete")
         return enhanced_metrics
 
     def create_visualizations(self) -> Dict[str, plt.Figure]:
@@ -1105,8 +1220,8 @@ class SecurityModuleAnalyzer:
                     f"{data['total_instances']}",
                     f"{data['activated_instances']}",
                     data['most_common_module'],
-                    f"{data['max_concurrent'] if data['max_concurrent'] else 'N/A'}",
-                    f"{data['total_utilization_hours']:.1f}" if data['total_utilization_hours'] != "N/A" else "N/A"
+                    f"{data['max_concurrent'] if data['max_concurrent'] else 'None'}",
+                    f"{data['total_utilization_hours']:.1f}" if data['total_utilization_hours'] != "None" else "None"
                 ])
             table = Table(env_data, hAlign='LEFT')
             table.setStyle(TableStyle([
@@ -1203,92 +1318,234 @@ class SecurityModuleAnalyzer:
                 story.append(Spacer(1, 12))
 
             doc.build(story)
-            logger.info(f"PDF report generated successfully at {pdf_path}")
 
         except Exception as e:
             logger.error(f"Failed to create PDF report: {str(e)}")
 
     def generate_report(self) -> None:
-        """
-        Generate a comprehensive HTML and PDF report of the analysis.
-
-        The report includes overall metrics, environment distribution, module usage analysis, and monthly trends.
-        """
-        print("\nGenerating report...")
+        """Generate a comprehensive HTML and PDF report of the analysis."""
+        # print("\nGenerating report...")
         
         try:
             # Stage 1: Calculate enhanced metrics
-            print("  ↳ Calculating enhanced metrics...")
+            # print("  ↳ Calculating enhanced metrics...")
             enhanced_metrics = self.calculate_enhanced_metrics()
             logger.debug(f"Enhanced Metrics: {enhanced_metrics}")
             
             # Stage 2: Prepare metrics for template
             print("  ↳ Preparing template data...")
             combined_metrics = {
-                'overall_metrics': enhanced_metrics['overall_metrics'],
-                'utilization_metrics': enhanced_metrics['utilization_metrics'],
-                'realm_metrics': enhanced_metrics['realm_metrics'],
-                'by_environment': self.metrics['by_environment'],
-                'overall': self.metrics['overall']
+                'overall_metrics': enhanced_metrics.get('overall_metrics', {}),
+                'utilization_metrics': enhanced_metrics.get('utilization_metrics', {}),
+                'realm_metrics': enhanced_metrics.get('realm_metrics', {}),
+                'by_environment': self.metrics.get('by_environment', {}),
+                'overall': self.metrics.get('overall', {})
             }
-            logger.debug(f"Combined Metrics: {combined_metrics}")
             
-            # Stage 3: Calculate unknown patterns
-            print("  ↳ Analyzing unknown patterns...")
-            unknown_patterns = []
-            if 'Unknown' in self.metrics['by_environment']:
-                unknown_env = self.metrics['by_environment']['Unknown']
-                unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]  # Example extraction
-            logger.debug(f"Unknown Patterns: {unknown_patterns}")
+            # Ensure all required values exist with defaults
+            if 'overall' not in combined_metrics:
+                combined_metrics['overall'] = {}
             
-            # Stage 4: Calculate monthly metrics
+            defaults = {
+                'total_instances': 0,
+                'activated_instances': 0,
+                'inactive_instances': 0,
+                'total_hours': 0.0,
+                'activated_hours': 0.0,
+                'inactive_hours': 0.0,
+            }
+            
+            # Set defaults for overall metrics
+            for key, default_value in defaults.items():
+                if key not in combined_metrics['overall']:
+                    combined_metrics['overall'][key] = default_value
+            
+            # Stage 3: Calculate monthly metrics with defaults
             print("  ↳ Processing monthly data...")
-            monthly_metrics = self.calculate_monthly_metrics()
-            logger.debug(f"Monthly Metrics: {monthly_metrics}")
+            # Get all months in the data
+            months = pd.date_range(
+                start=self.data['start_datetime'].min(),
+                end=self.data['start_datetime'].max(),
+                freq='MS'
+            ).to_period('M')
             
-            # Ensure monthly metrics are included in combined metrics
-            combined_metrics['monthly'] = monthly_metrics
+            monthly_metrics = {
+                'data': [],
+                'data_gaps': [],
+                'total_months': len(months),
+                'date_range': f"{months[0]} to {months[-1]}"
+            }
             
-            # Stage 5: Create report context
+            # Process monthly data with progress bar
+            with tqdm(total=len(months), desc="    Processing months", ncols=100, position=0, leave=True) as pbar:
+                for month in months:
+                    pbar.set_description(f"    Processing {month}")
+                    
+                    # Filter data for this month
+                    month_mask = (
+                        (self.data['start_datetime'].dt.to_period('M') == month)
+                    )
+                    month_data = self.data[month_mask]
+                    
+                    if not month_data.empty:
+                        # Get unique hostnames for this month
+                        unique_hostnames = month_data['Hostname'].unique()
+                        
+                        # Show progress for larger datasets
+                        if len(unique_hostnames) > 1000:
+                            with tqdm(total=len(unique_hostnames), desc="      Building timeline", 
+                                    ncols=100, position=1, leave=False) as host_pbar:
+                                timeline = []
+                                for hostname in unique_hostnames:
+                                    host_data = month_data[month_data['Hostname'] == hostname]
+                                    start = host_data['start_datetime'].min()
+                                    stop = host_data['stop_datetime'].max()
+                                    
+                                    if pd.notna(start) and pd.notna(stop):
+                                        timeline.append((start, 1))
+                                        timeline.append((stop, -1))
+                                    host_pbar.update(1)
+                                
+                                if timeline:
+                                    host_pbar.set_description("      Sorting timeline")
+                                    timeline.sort(key=lambda x: x[0])
+                                    
+                                    host_pbar.set_description("      Calculating concurrent")
+                                    current_count = 0
+                                    max_concurrent = 0
+                                    for _, count_change in timeline:
+                                        current_count += count_change
+                                        max_concurrent = max(max_concurrent, current_count)
+                        else:
+                            # For smaller datasets, calculate without progress bar
+                            max_concurrent = self._calculate_max_concurrent(month_data)
+                        
+                        # Calculate other metrics
+                        activated_instances = len(month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
+                        avg_modules = month_data[self.MODULE_COLUMNS].sum(axis=1).mean()
+                        total_hours = (month_data['Duration (Seconds)'].sum() / 3600) if 'Duration (Seconds)' in month_data.columns else 0
+                        
+                        monthly_metrics['data'].append({
+                            'month': str(month),
+                            'activated_instances': activated_instances,
+                            'max_concurrent': max_concurrent,
+                            'avg_modules_per_host': avg_modules,
+                            'total_hours': total_hours
+                        })
+                    else:
+                        monthly_metrics['data_gaps'].append(str(month))
+                    
+                    pbar.update(1)
+
+            # Stage 4: Prepare report context
             print("  ↳ Preparing final report...")
             report_context = {
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'metrics': combined_metrics,
-                'unknown_patterns': unknown_patterns
+                'metrics': {
+                    'overall': combined_metrics.get('overall', {
+                        'total_instances': 0,
+                        'activated_instances': 0,
+                        'inactive_instances': 0,
+                        'total_hours': 0.0,
+                        'activated_hours': 0.0,
+                        'inactive_hours': 0.0
+                    }),
+                    'overall_metrics': combined_metrics.get('overall_metrics', {
+                        'max_concurrent_overall': 0,
+                        'total_unique_instances': 0,
+                        'total_activated_instances': 0,
+                        'total_inactive_instances': 0
+                    }),
+                    'by_environment': combined_metrics.get('by_environment', {}),
+                    'monthly': monthly_metrics or {
+                        'data': [],
+                        'data_gaps': [],
+                        'total_months': 0,
+                        'date_range': 'No data available'
+                    }
+                },
+                'unknown_patterns': []
             }
-            logger.debug(f"Report Context: {report_context}")
+            
+            # Add unknown patterns if they exist
+            if 'Unknown' in self.metrics.get('by_environment', {}):
+                unknown_env = self.metrics['by_environment']['Unknown']
+                unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]
+                report_context['unknown_patterns'] = unknown_patterns
+            
+            # Ensure all environment metrics have required fields
+            for env in report_context['metrics']['by_environment']:
+                env_data = report_context['metrics']['by_environment'][env]
+                if not isinstance(env_data, dict):
+                    env_data = {}
+                
+                defaults = {
+                    'total_instances': 0,
+                    'activated_instances': 0,
+                    'inactive_instances': 0,
+                    'most_common_module': 'None',
+                    'max_concurrent': 0,
+                    'total_utilization_hours': 0.0
+                }
+                
+                for key, default_value in defaults.items():
+                    if key not in env_data:
+                        env_data[key] = default_value
+                
+                report_context['metrics']['by_environment'][env] = env_data
             
             # Convert metrics to serializable types
             serializable_context = self._convert_to_serializable(report_context)
             
-            # Stage 6: Render HTML template
+            # Add unknown patterns if they exist
+            if 'Unknown' in self.metrics.get('by_environment', {}):
+                unknown_env = self.metrics['by_environment']['Unknown']
+                unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]
+                report_context['unknown_patterns'] = unknown_patterns
+            
+            # Convert metrics to serializable types
+            serializable_context = self._convert_to_serializable(report_context)
+            
+            # After preparing report_context
+            print("  ↳ Ensuring all template variables are defined...")
+            for env in report_context['metrics']['by_environment']:
+                env_data = report_context['metrics']['by_environment'][env]
+                if not isinstance(env_data, dict):
+                    env_data = {}
+                
+                defaults = {
+                    'total_instances': 0,
+                    'activated_instances': 0,
+                    'inactive_instances': 0,
+                    'most_common_module': 'None',
+                    'max_concurrent': 0,
+                    'total_utilization_hours': 0.0  # Ensure this is set
+                }
+                
+                for key, default_value in defaults.items():
+                    if key not in env_data or env_data[key] is None:
+                        env_data[key] = default_value
+                
+                report_context['metrics']['by_environment'][env] = env_data
+            
+            # Stage 5: Render HTML template
             print("  ↳ Rendering HTML template...")
             template = Template(self.REPORT_TEMPLATE)
-            report_html = template.render(**serializable_context)
+            report_html = template.render(**report_context)
             
-            # Stage 7: Embed existing images in HTML
-            print("  ↳ Embedding images in HTML...")
-            visualizations = {
-                'module_usage': plt.imread(self.output_dir / 'module_usage.png'),
-                'environment_distribution': plt.imread(self.output_dir / 'environment_distribution.png')
-            }
-            report_html = self.embed_images_in_html(report_html, visualizations)
-            
-            # Stage 8: Save HTML Report
+            # Stage 6: Save HTML Report
             print("  ↳ Saving HTML report...")
             report_path = self.output_dir / 'report.html'
             with open(report_path, 'w', encoding='utf-8') as f:
                 f.write(report_html)
             
-            # Stage 9: Generate PDF Report with ReportLab
-            print("  ↳ Generating PDF report with ReportLab...")
-            self.create_pdf_report(report_context, self.output_dir / 'report.pdf')
-            logger.info(f"PDF report generated successfully at {self.output_dir / 'report.pdf'}")
-        
-        except TypeError as te:
-            logger.error(f"Failed to generate report: {str(te)}")
+            # Stage 7: Generate PDF Report
+            print("  ↳ Generating PDF report...")
+            self.create_pdf_report(serializable_context, self.output_dir / 'report.pdf')
+            
         except Exception as e:
             logger.error(f"Failed to generate report: {str(e)}")
+            raise
 
     def _convert_to_serializable(self, obj):
         """
@@ -1327,7 +1584,7 @@ class SecurityModuleAnalyzer:
                 nonlocal current_step
                 current_step += 1
                 print(f"\n[{current_step}/{total_steps}] {step_name}")
-                logger.info(f"Starting: {step_name}")
+                logger.info(f" Starting: {step_name}")
 
             # Step 1: Load and preprocess data
             update_progress("Loading and preprocessing data...")
