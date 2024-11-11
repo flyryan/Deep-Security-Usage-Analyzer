@@ -643,22 +643,36 @@ class SecurityModuleAnalyzer:
             return monthly_metrics
 
     def _calculate_max_concurrent(self, df: pd.DataFrame) -> int:
-        """Helper method to calculate maximum concurrent instances."""
+        """
+        Calculate true max concurrent instances by considering overlapping time periods
+        and ensuring each instance is only counted once.
+        """
         max_concurrent = 0
         try:
             if 'stop_datetime' in df.columns:
+                # Group by hostname to handle multiple records per instance
                 timeline = []
-                for _, row in df.iterrows():
-                    if pd.notna(row['start_datetime']) and pd.notna(row['stop_datetime']):
-                        timeline.append((row['start_datetime'], 1))
-                        timeline.append((row['stop_datetime'], -1))
+                for hostname in df['Hostname'].unique():
+                    host_data = df[df['Hostname'] == hostname]
+                    
+                    # Get the earliest start and latest stop for each instance
+                    start = host_data['start_datetime'].min()
+                    stop = host_data['stop_datetime'].max()
+                    
+                    if pd.notna(start) and pd.notna(stop):
+                        timeline.append((start, 1))
+                        timeline.append((stop, -1))
                 
                 if timeline:
+                    # Sort by timestamp
                     timeline.sort(key=lambda x: x[0])
+                    
+                    # Calculate concurrent instances
                     current_count = 0
                     for _, count_change in timeline:
                         current_count += count_change
                         max_concurrent = max(max_concurrent, current_count)
+                    
         except Exception as e:
             logger.warning(f"Error calculating max concurrent: {str(e)}")
         
@@ -793,6 +807,10 @@ class SecurityModuleAnalyzer:
         })
         
         return metrics
+    
+    def calculate_overall_max_concurrent(self, df: pd.DataFrame) -> int:
+            """Calculate the true overall max concurrent instances."""
+            return self._calculate_max_concurrent(df)
 
     def calculate_enhanced_metrics(self) -> Dict:
         """Calculate comprehensive metrics including utilization and realm statistics."""
@@ -896,11 +914,7 @@ class SecurityModuleAnalyzer:
             'total_unique_instances': total_unique_instances,
             'total_activated_instances': total_activated,
             'total_inactive_instances': total_unique_instances - total_activated,
-            'max_concurrent_overall': sum(
-                metrics['max_concurrent'] 
-                for metrics in enhanced_metrics['realm_metrics'].values() 
-                if isinstance(metrics['max_concurrent'], (int, float))
-            )
+            'max_concurrent_overall': self.calculate_overall_max_concurrent(self.data)
         }
         
         # Calculate utilization metrics
