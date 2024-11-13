@@ -364,7 +364,14 @@ class SecurityModuleAnalyzer:
                     {% for month in metrics.monthly.data %}
                     <tr>
                         <td>{{ month.month | default('None') }}</td>
-                        <td>{{ month.activated_instances | default(0) }}</td>
+                        <td>
+                            {{ month.activated_instances | default(0) }}
+                            {% if month.new_instances is defined and month.lost_instances is defined %}
+                                {% if not loop.last %}
+                                    (+{{ month.new_instances }}/-{{ month.lost_instances }})
+                                {% endif %}
+                            {% endif %}
+                        </td>
                         <td>{{ month.max_concurrent | default(0) }}</td>
                         <td>{{ "%.2f"|format(month.avg_modules_per_host | default(0.0)) }}</td>
                         <td>{{ "%.1f"|format(month.total_hours | default(0.0)) }}</td>
@@ -529,13 +536,16 @@ class SecurityModuleAnalyzer:
                     # Standardize column names and handle dates
                     df.columns = df.columns.str.strip()
                     
-                    # Add missing module columns with zeros
+                    # Add missing module columns with zeros and handle NaN values
                     for col in self.MODULE_COLUMNS:
                         if col not in df.columns:
                             df[col] = 0
                             logger.debug(f"Added missing module column {col} to {file.name}")
+                        else:
+                            # Fill NaN values with 0 and convert to int
+                            df[col] = df[col].fillna(0).astype(int)
                     
-                    # Handle datetime columns
+                    # Handle date columns
                     if 'Start Date' in df.columns and 'Start Time' in df.columns:
                         try:
                             df['start_datetime'] = pd.to_datetime(
@@ -551,24 +561,25 @@ class SecurityModuleAnalyzer:
                                 errors='coerce'
                             )
                         except Exception as e:
-                            logger.warning(f"Error converting date/time columns in {file.name}: {str(e)}")
-                            df['start_datetime'] = pd.NaT
-                            df['stop_datetime'] = pd.NaT
+                            logger.error(f"Error converting date/time columns in {file.name}: {str(e)}")
+                            continue
                     elif 'Start' in df.columns:
                         try:
                             df['start_datetime'] = pd.to_datetime(df['Start'], errors='coerce')
                             if 'Stop' in df.columns:
                                 df['stop_datetime'] = pd.to_datetime(df['Stop'], errors='coerce')
-                            else:
-                                df['stop_datetime'] = pd.NaT
                         except Exception as e:
-                            logger.warning(f"Error converting Start/Stop columns in {file.name}: {str(e)}")
-                            df['start_datetime'] = pd.NaT
-                            df['stop_datetime'] = pd.NaT
+                            logger.error(f"Error converting Start/Stop columns in {file.name}: {str(e)}")
+                            continue
                     else:
-                        logger.warning(f"No datetime columns found in {file.name}")
-                        df['start_datetime'] = pd.NaT
-                        df['stop_datetime'] = pd.NaT
+                        logger.error(f"No valid datetime columns found in {file.name}")
+                        continue
+                    
+                    # Remove rows with invalid dates
+                    invalid_dates = df['start_datetime'].isna() | df['stop_datetime'].isna()
+                    if invalid_dates.any():
+                        logger.debug(f"Removing {invalid_dates.sum()} rows with invalid dates from {file.name}")
+                        df = df[~invalid_dates]
                     
                     # Extract environment from filename
                     env = None
@@ -594,24 +605,12 @@ class SecurityModuleAnalyzer:
                     # Add 'Source_Environment' column
                     df['Source_Environment'] = env
                     
-                    # Verify all required columns are present
-                    missing_cols = set(self.MODULE_COLUMNS) - set(df.columns)
-                    if missing_cols:
-                        logger.warning(f"Missing columns in {file.name}: {missing_cols}")
-                    
                     # Verify module columns contain valid values (0 or 1)
                     for col in self.MODULE_COLUMNS:
                         invalid_values = df[col][(df[col] != 0) & (df[col] != 1)].unique()
                         if len(invalid_values) > 0:
-                            logger.warning(f"Invalid values found in {col} column of {file.name}: {invalid_values}")
-                            # Convert invalid values to 0
+                            logger.debug(f"Converting invalid values in {col} column of {file.name}")
                             df[col] = df[col].map(lambda x: 1 if x == 1 else 0)
-                    
-                    # Remove rows with invalid dates
-                    invalid_dates = df['start_datetime'].isna() | df['stop_datetime'].isna()
-                    if invalid_dates.any():
-                        logger.warning(f"Removing {invalid_dates.sum()} rows with invalid dates from {file.name}")
-                        df = df[~invalid_dates]
                     
                     if len(df) > 0:
                         dfs.append(df)
@@ -631,12 +630,6 @@ class SecurityModuleAnalyzer:
         # Combine all dataframes
         combined_df = pd.concat(dfs, ignore_index=True)
         
-        # Verify all module columns exist in combined dataset
-        for col in self.MODULE_COLUMNS:
-            if col not in combined_df.columns:
-                logger.error(f"Module column {col} missing from combined dataset")
-                combined_df[col] = 0
-        
         # Add progress meter for environment classification
         combined_df['Environment'] = combined_df.progress_apply(
             lambda row: self.classify_environment(row['Hostname'], row['Source_Environment']),
@@ -655,28 +648,17 @@ class SecurityModuleAnalyzer:
         if null_hostnames > 0:
             logger.warning(f"Found {null_hostnames} rows with null hostnames")
         
-        invalid_modules = False
+        # Final verification of module values
         for col in self.MODULE_COLUMNS:
             invalid = combined_df[col][(combined_df[col] != 0) & (combined_df[col] != 1)].count()
             if invalid > 0:
-                logger.error(f"Found {invalid} invalid values in {col} column")
-                invalid_modules = True
-        
-        if invalid_modules:
-            logger.warning("Fixing invalid module values...")
-            for col in self.MODULE_COLUMNS:
+                logger.debug(f"Final cleanup: Converting {invalid} invalid values in {col}")
                 combined_df[col] = combined_df[col].map(lambda x: 1 if x == 1 else 0)
-        
-        # Final datetime validation
-        if combined_df['start_datetime'].isna().any() or combined_df['stop_datetime'].isna().any():
-            logger.error("Found rows with missing datetime values after preprocessing")
-            # Remove rows with invalid dates
-            combined_df = combined_df.dropna(subset=['start_datetime', 'stop_datetime'])
         
         # Ensure stop_datetime is after start_datetime
         invalid_duration = combined_df['stop_datetime'] < combined_df['start_datetime']
         if invalid_duration.any():
-            logger.warning(f"Found {invalid_duration.sum()} rows where stop_datetime is before start_datetime")
+            logger.warning(f"Removing {invalid_duration.sum()} rows where stop_datetime is before start_datetime")
             combined_df = combined_df[~invalid_duration]
         
         print(f"✓ Final dataset: {len(combined_df):,} records from {len(combined_df['Hostname'].unique()):,} unique hosts")
@@ -684,12 +666,7 @@ class SecurityModuleAnalyzer:
         # Log summary statistics
         logger.info(f"Total records: {len(combined_df):,}")
         logger.info(f"Unique hosts: {len(combined_df['Hostname'].unique()):,}")
-        
-        if len(combined_df) > 0:
-            logger.info(f"Date range: {combined_df['start_datetime'].min()} to {combined_df['start_datetime'].max()}")
-        else:
-            logger.warning("No data remains after preprocessing")
-        
+        logger.info(f"Date range: {combined_df['start_datetime'].min()} to {combined_df['start_datetime'].max()}")
         logger.info(f"Environments found: {', '.join(sorted(combined_df['Environment'].unique()))}")
         
         return combined_df
@@ -774,6 +751,7 @@ class SecurityModuleAnalyzer:
             logger.info(f"Processing {len(all_months)} months of data...")
             monthly_data = []
             overall_max_concurrent = 0
+            previous_month_instances = set()  # Track instances from previous month
             
             with tqdm(total=len(all_months), desc="Processing months", ncols=100) as pbar:
                 for month_start in all_months:
@@ -790,6 +768,10 @@ class SecurityModuleAnalyzer:
                         # Get activated instances that had activity this month
                         monthly_hosts = set(month_data['Hostname'].unique())
                         active_and_activated = monthly_hosts.intersection(activated_instances)
+                        
+                        # Calculate instance changes
+                        new_instances = active_and_activated - previous_month_instances
+                        lost_instances = previous_month_instances - active_and_activated
                         
                         # Calculate max concurrent using helper method
                         max_concurrent = self._calculate_concurrent_usage(
@@ -821,6 +803,8 @@ class SecurityModuleAnalyzer:
                         data = {
                             'month': month_start.strftime('%Y-%m'),
                             'activated_instances': len(active_and_activated),
+                            'new_instances': len(new_instances),
+                            'lost_instances': len(lost_instances),
                             'max_concurrent': max_concurrent,
                             'avg_modules_per_host': avg_modules,
                             'total_hours': total_hours
@@ -831,6 +815,8 @@ class SecurityModuleAnalyzer:
                             f"Month {month_start.strftime('%Y-%m')}: "
                             f"Active={len(monthly_hosts)}, "
                             f"Activated={len(active_and_activated)}, "
+                            f"New={len(new_instances)}, "
+                            f"Lost={len(lost_instances)}, "
                             f"Max Concurrent={max_concurrent}"
                         )
                         
@@ -838,6 +824,9 @@ class SecurityModuleAnalyzer:
                             f"Processing {month_start.strftime('%Y-%m')} "
                             f"({len(active_and_activated)}/{len(monthly_hosts)} activated)"
                         )
+                        
+                        # Store current instances for next iteration
+                        previous_month_instances = active_and_activated
                     else:
                         monthly_metrics['data_gaps'].append(month_start.strftime('%Y-%m'))
                     
