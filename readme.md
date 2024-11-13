@@ -26,6 +26,8 @@ DSUA aims to provide a clear understanding of module usage patterns by analyzing
   - matplotlib
   - seaborn
   - jinja2
+  - openpyxl
+  - xlrd
   - reportlab
   - tqdm
 
@@ -39,11 +41,11 @@ pip install -r requirements.txt
 
 - **Comprehensive Analysis:** DSUA processes usage data from multiple environments at the same time and generates detailed reports.
 - **Deduplication:** Automatically removes duplicate files and entries, ensuring accurate analysis without redundancy. This feature allows you to dump in any and every usage report you have without having to worry about overlapping or duplicate data.
-- **Environment Classification:** Classifies data entries into environments like Production, Development, Test, etc., based on hostname and IP patterns.
+- **Enhanced Environment Classification:** Classifies data entries into environments like Production, Development, Test, etc., based on hostname and IP patterns using a comprehensive set of enhanced patterns.
 - **Module Usage Metrics:** Calculates usage metrics for various Deep Security modules, providing insights into their utilization.
-- **Visualizations:** Generates visual representations of module usage and environment distribution.
-- **HTML and PDF Reports:** Creates comprehensive reports in both HTML and PDF formats for easy sharing and review.
-- **Error Handling:** Robust error handling and logging to ensure smooth execution and easy troubleshooting.
+- **Visualizations:** Generates detailed visualizations, including module usage bar charts and environment distribution pie charts.
+- **HTML and PDF Reports:** Creates comprehensive reports in both HTML and PDF formats with embedded visualizations for easy sharing and review.
+- **Error Handling and Logging:** Robust error handling and logging with progress meters to ensure smooth execution and easy troubleshooting.
 - **Customizable:** Adjustable parameters for environment patterns and module definitions to fit specific needs.
 
 ## Deduplication Process
