@@ -398,7 +398,6 @@ class SecurityModuleAnalyzer:
     def __init__(self):
         """
         Initialize the Trend Micro Deep Security Usage Analyzer.
-
         Sets up directories for input and output, and prepares data structures for analysis.
         """
         # Use current directory as default
@@ -412,13 +411,35 @@ class SecurityModuleAnalyzer:
         self.data = None
         self.metrics = None
         
+        # Define module columns - these should always be included
+        self.MODULE_COLUMNS = ['AM', 'WRS', 'DC', 'AC', 'IM', 'LI', 'FW', 'DPI', 'SAP']
+        
         # Check for input files
         input_files = [f for f in self.directory.glob('*') if f.suffix in self.VALID_EXTENSIONS]
         if not input_files:
             raise ValueError(f"No valid input files found in {self.directory}")
         
-        logger.info(f" Initialized Trend Micro Deep Security Usage Analyzer with input directory: {self.directory}")
-        logger.info(f" Output will be saved to: {self.output_dir}")
+        # Load first file to check available columns
+        test_file = input_files[0]
+        try:
+            if test_file.suffix == '.csv':
+                test_df = pd.read_csv(test_file)
+            else:
+                test_df = pd.read_excel(test_file)
+            
+            # Add missing module columns with zeros
+            for col in self.MODULE_COLUMNS:
+                if col not in test_df.columns:
+                    test_df[col] = 0
+                    logger.debug(f"Added missing module column: {col}")
+            
+            logger.info(f" Initialized with modules: {', '.join(self.MODULE_COLUMNS)}")
+            logger.info(f" Output will be saved to: {self.output_dir}")
+            
+        except Exception as e:
+            logger.error(f"Error initializing analyzer: {str(e)}")
+            raise
+        
         tqdm.pandas()  # Initialize tqdm for pandas
 
     def classify_environment(self, hostname: str, source_env: Optional[str] = None) -> str:
@@ -507,10 +528,47 @@ class SecurityModuleAnalyzer:
                     
                     # Standardize column names and handle dates
                     df.columns = df.columns.str.strip()
-                    if 'Start' in df.columns:
-                        df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
-                    if 'Stop' in df.columns:
-                        df['Stop'] = pd.to_datetime(df['Stop'], errors='coerce')
+                    
+                    # Add missing module columns with zeros
+                    for col in self.MODULE_COLUMNS:
+                        if col not in df.columns:
+                            df[col] = 0
+                            logger.debug(f"Added missing module column {col} to {file.name}")
+                    
+                    # Handle datetime columns
+                    if 'Start Date' in df.columns and 'Start Time' in df.columns:
+                        try:
+                            df['start_datetime'] = pd.to_datetime(
+                                df['Start Date'].astype(str) + ' ' + 
+                                df['Start Time'].astype(str),
+                                format='mixed',
+                                errors='coerce'
+                            )
+                            df['stop_datetime'] = pd.to_datetime(
+                                df['Stop Date'].astype(str) + ' ' + 
+                                df['Stop Time'].astype(str),
+                                format='mixed',
+                                errors='coerce'
+                            )
+                        except Exception as e:
+                            logger.warning(f"Error converting date/time columns in {file.name}: {str(e)}")
+                            df['start_datetime'] = pd.NaT
+                            df['stop_datetime'] = pd.NaT
+                    elif 'Start' in df.columns:
+                        try:
+                            df['start_datetime'] = pd.to_datetime(df['Start'], errors='coerce')
+                            if 'Stop' in df.columns:
+                                df['stop_datetime'] = pd.to_datetime(df['Stop'], errors='coerce')
+                            else:
+                                df['stop_datetime'] = pd.NaT
+                        except Exception as e:
+                            logger.warning(f"Error converting Start/Stop columns in {file.name}: {str(e)}")
+                            df['start_datetime'] = pd.NaT
+                            df['stop_datetime'] = pd.NaT
+                    else:
+                        logger.warning(f"No datetime columns found in {file.name}")
+                        df['start_datetime'] = pd.NaT
+                        df['stop_datetime'] = pd.NaT
                     
                     # Extract environment from filename
                     env = None
@@ -536,13 +594,48 @@ class SecurityModuleAnalyzer:
                     # Add 'Source_Environment' column
                     df['Source_Environment'] = env
                     
-                    dfs.append(df)
+                    # Verify all required columns are present
+                    missing_cols = set(self.MODULE_COLUMNS) - set(df.columns)
+                    if missing_cols:
+                        logger.warning(f"Missing columns in {file.name}: {missing_cols}")
+                    
+                    # Verify module columns contain valid values (0 or 1)
+                    for col in self.MODULE_COLUMNS:
+                        invalid_values = df[col][(df[col] != 0) & (df[col] != 1)].unique()
+                        if len(invalid_values) > 0:
+                            logger.warning(f"Invalid values found in {col} column of {file.name}: {invalid_values}")
+                            # Convert invalid values to 0
+                            df[col] = df[col].map(lambda x: 1 if x == 1 else 0)
+                    
+                    # Remove rows with invalid dates
+                    invalid_dates = df['start_datetime'].isna() | df['stop_datetime'].isna()
+                    if invalid_dates.any():
+                        logger.warning(f"Removing {invalid_dates.sum()} rows with invalid dates from {file.name}")
+                        df = df[~invalid_dates]
+                    
+                    if len(df) > 0:
+                        dfs.append(df)
+                    else:
+                        logger.warning(f"No valid data remained in {file.name} after preprocessing")
                     
                 except Exception as e:
                     print(f"\n⚠️  Error processing {file.name}: {str(e)}")
+                    logger.error(f"Error processing {file.name}: {str(e)}")
+                    logger.debug("Error details:", exc_info=True)
         
         print("\nCombining, classifying, and cleaning data...")
+        
+        if not dfs:
+            raise ValueError("No valid data loaded from any files")
+        
+        # Combine all dataframes
         combined_df = pd.concat(dfs, ignore_index=True)
+        
+        # Verify all module columns exist in combined dataset
+        for col in self.MODULE_COLUMNS:
+            if col not in combined_df.columns:
+                logger.error(f"Module column {col} missing from combined dataset")
+                combined_df[col] = 0
         
         # Add progress meter for environment classification
         combined_df['Environment'] = combined_df.progress_apply(
@@ -557,13 +650,96 @@ class SecurityModuleAnalyzer:
             removed = original_len - len(combined_df)
             print(f"✓ Removed {removed:,} duplicate rows ({(removed/original_len)*100:.1f}%)")
         
+        # Verify data quality
+        null_hostnames = combined_df['Hostname'].isnull().sum()
+        if null_hostnames > 0:
+            logger.warning(f"Found {null_hostnames} rows with null hostnames")
+        
+        invalid_modules = False
+        for col in self.MODULE_COLUMNS:
+            invalid = combined_df[col][(combined_df[col] != 0) & (combined_df[col] != 1)].count()
+            if invalid > 0:
+                logger.error(f"Found {invalid} invalid values in {col} column")
+                invalid_modules = True
+        
+        if invalid_modules:
+            logger.warning("Fixing invalid module values...")
+            for col in self.MODULE_COLUMNS:
+                combined_df[col] = combined_df[col].map(lambda x: 1 if x == 1 else 0)
+        
+        # Final datetime validation
+        if combined_df['start_datetime'].isna().any() or combined_df['stop_datetime'].isna().any():
+            logger.error("Found rows with missing datetime values after preprocessing")
+            # Remove rows with invalid dates
+            combined_df = combined_df.dropna(subset=['start_datetime', 'stop_datetime'])
+        
+        # Ensure stop_datetime is after start_datetime
+        invalid_duration = combined_df['stop_datetime'] < combined_df['start_datetime']
+        if invalid_duration.any():
+            logger.warning(f"Found {invalid_duration.sum()} rows where stop_datetime is before start_datetime")
+            combined_df = combined_df[~invalid_duration]
+        
         print(f"✓ Final dataset: {len(combined_df):,} records from {len(combined_df['Hostname'].unique()):,} unique hosts")
         
+        # Log summary statistics
+        logger.info(f"Total records: {len(combined_df):,}")
+        logger.info(f"Unique hosts: {len(combined_df['Hostname'].unique()):,}")
+        
+        if len(combined_df) > 0:
+            logger.info(f"Date range: {combined_df['start_datetime'].min()} to {combined_df['start_datetime'].max()}")
+        else:
+            logger.warning("No data remains after preprocessing")
+        
+        logger.info(f"Environments found: {', '.join(sorted(combined_df['Environment'].unique()))}")
+        
         return combined_df
+    
+    def _calculate_concurrent_usage(self, df: pd.DataFrame, start_date=None, end_date=None) -> int:
+        """
+        Calculate maximum concurrent usage for a given dataset and optional date range.
+        
+        Parameters:
+            df (pd.DataFrame): DataFrame containing the data
+            start_date (pd.Timestamp, optional): Start of period to consider
+            end_date (pd.Timestamp, optional): End of period to consider
+        
+        Returns:
+            int: Maximum concurrent usage
+        """
+        max_concurrent = 0
+        try:
+            timeline = []
+            for _, row in df.iterrows():
+                start = row['start_datetime']
+                stop = row['stop_datetime']
+                
+                # Clip to period boundaries if specified
+                if start_date is not None:
+                    start = max(start, start_date)
+                if end_date is not None:
+                    stop = min(stop, end_date)
+                
+                if pd.notna(start) and pd.notna(stop) and start <= stop:
+                    timeline.append((start, 1))
+                    timeline.append((stop, -1))
+            
+            if timeline:
+                timeline.sort(key=lambda x: x[0])
+                current_count = 0
+                for _, count_change in timeline:
+                    current_count += count_change
+                    max_concurrent = max(max_concurrent, current_count)
+        
+        except Exception as e:
+            logger.error(f"Error calculating concurrent usage: {str(e)}")
+            logger.debug("Error details:", exc_info=True)
+        
+        return max_concurrent
 
     def calculate_monthly_metrics(self) -> Dict:
         """
         Calculate monthly metrics to identify trends and data gaps.
+        Uses consistent calculation methods with overall metrics.
 
         Returns:
             Dict: A dictionary containing monthly metrics and data gaps.
@@ -576,113 +752,136 @@ class SecurityModuleAnalyzer:
         }
         
         try:
-            # Handle different date column formats
-            if 'Start Date' in self.data.columns and 'Start Time' in self.data.columns:
-                self.data['start_datetime'] = pd.to_datetime(
-                    self.data['Start Date'].astype(str) + ' ' + 
-                    self.data['Start Time'].astype(str),
-                    format='mixed',
-                    errors='coerce'
-                )
-            elif 'Start' in self.data.columns:
-                self.data['start_datetime'] = pd.to_datetime(self.data['Start'], errors='coerce')
+            logger.info("Starting monthly metrics calculation...")
             
-            if not 'start_datetime' in self.data.columns or self.data['start_datetime'].isna().all():
-                logger.warning("No valid date information found")
-                return monthly_metrics
+            # First, get all activated instances (these are instances that have any modules at any time)
+            activated_mask = self.data[self.MODULE_COLUMNS].sum(axis=1) > 0
+            activated_instances = set(self.data[activated_mask]['Hostname'].unique())
+            logger.debug(f"Total activated instances: {len(activated_instances)}")
             
             # Get date range
             min_date = self.data['start_datetime'].min()
             max_date = self.data['start_datetime'].max()
             monthly_metrics['date_range'] = f"{min_date.strftime('%Y-%m')} to {max_date.strftime('%Y-%m')}"
             
-            # Generate all months between min and max date
+            # Generate all months
             all_months = pd.date_range(
                 start=min_date.replace(day=1),
                 end=max_date.replace(day=1),
                 freq='MS'
-            ).to_period('M')
+            )
             
-            # Group by month
-            self.data['month'] = self.data['start_datetime'].dt.to_period('M')
-            months_with_data = set(self.data['month'].unique())
-            
-            # Track data gaps
-            for month in all_months:
-                if month not in months_with_data:
-                    monthly_metrics['data_gaps'].append(month.strftime('%Y-%m'))
-            
-            # Calculate metrics for each month
+            logger.info(f"Processing {len(all_months)} months of data...")
             monthly_data = []
-            for month in months_with_data:
-                month_data = self.data[self.data['month'] == month]
-                
-                # Calculate metrics for the month
-                activated_instances = len(month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
-                
-                # Calculate maximum concurrent for the month
-                max_concurrent = self._calculate_max_concurrent(month_data)
-                
-                data = {
-                    'month': str(month),
-                    'activated_instances': activated_instances,
-                    'max_concurrent': max_concurrent,
-                    'avg_modules_per_host': month_data[self.MODULE_COLUMNS].sum(axis=1).mean(),
-                    'total_hours': (month_data['Duration (Seconds)'].sum() / 3600) if 'Duration (Seconds)' in month_data.columns else 0
-                }
-                monthly_data.append(data)
+            overall_max_concurrent = 0
+            
+            with tqdm(total=len(all_months), desc="Processing months", ncols=100) as pbar:
+                for month_start in all_months:
+                    month_end = month_start + pd.offsets.MonthEnd(1)
+                    
+                    # Get all records for this month
+                    month_mask = (
+                        (self.data['start_datetime'] <= month_end) & 
+                        (self.data['stop_datetime'] >= month_start)
+                    )
+                    month_data = self.data[month_mask].copy()
+                    
+                    if not month_data.empty:
+                        # Get activated instances that had activity this month
+                        monthly_hosts = set(month_data['Hostname'].unique())
+                        active_and_activated = monthly_hosts.intersection(activated_instances)
+                        
+                        # Calculate max concurrent using helper method
+                        max_concurrent = self._calculate_concurrent_usage(
+                            month_data,
+                            start_date=month_start,
+                            end_date=month_end
+                        )
+                        overall_max_concurrent = max(overall_max_concurrent, max_concurrent)
+                        
+                        # Calculate average modules for activated instances only
+                        activated_data = month_data[month_data['Hostname'].isin(active_and_activated)]
+                        avg_modules = (
+                            activated_data[self.MODULE_COLUMNS].sum(axis=1).mean()
+                            if not activated_data.empty else 0
+                        )
+                        
+                        # Calculate total hours
+                        if 'Duration (Seconds)' in month_data.columns:
+                            total_hours = month_data['Duration (Seconds)'].sum() / 3600
+                        else:
+                            # Calculate from datetime if Duration not available
+                            durations = month_data.apply(
+                                lambda row: min(row['stop_datetime'], month_end) - 
+                                        max(row['start_datetime'], month_start),
+                                axis=1
+                            )
+                            total_hours = durations.dt.total_seconds().sum() / 3600
+                        
+                        data = {
+                            'month': month_start.strftime('%Y-%m'),
+                            'activated_instances': len(active_and_activated),
+                            'max_concurrent': max_concurrent,
+                            'avg_modules_per_host': avg_modules,
+                            'total_hours': total_hours
+                        }
+                        monthly_data.append(data)
+                        
+                        logger.debug(
+                            f"Month {month_start.strftime('%Y-%m')}: "
+                            f"Active={len(monthly_hosts)}, "
+                            f"Activated={len(active_and_activated)}, "
+                            f"Max Concurrent={max_concurrent}"
+                        )
+                        
+                        pbar.set_description(
+                            f"Processing {month_start.strftime('%Y-%m')} "
+                            f"({len(active_and_activated)}/{len(monthly_hosts)} activated)"
+                        )
+                    else:
+                        monthly_metrics['data_gaps'].append(month_start.strftime('%Y-%m'))
+                    
+                    pbar.update(1)
             
             # Sort monthly data by month string (should be in YYYY-MM format)
             monthly_metrics['data'] = sorted(monthly_data, key=lambda x: x['month'], reverse=True)
             monthly_metrics['total_months'] = len(monthly_data)
             
+            # Validate against overall metrics
+            if hasattr(self, 'metrics') and 'overall_metrics' in self.metrics:
+                overall_max = self.metrics['overall_metrics']['max_concurrent_overall']
+                if overall_max != overall_max_concurrent:
+                    logger.warning(
+                        f"Overall max concurrent ({overall_max}) differs from "
+                        f"highest monthly max concurrent ({overall_max_concurrent})"
+                    )
+            
+            logger.info("Monthly metrics calculation complete")
             return monthly_metrics
             
         except Exception as e:
-            logger.warning(f"Error calculating monthly metrics: {str(e)}")
+            logger.error(f"Error calculating monthly metrics: {str(e)}")
+            logger.debug("Error details:", exc_info=True)
             return monthly_metrics
 
     def _calculate_max_concurrent(self, df: pd.DataFrame, show_progress: bool = False) -> int:
-        """
-        Calculate true max concurrent instances by considering overlapping time periods
-        and ensuring each instance is only counted once.
-        """
         max_concurrent = 0
         try:
-            if 'stop_datetime' in df.columns:
-                # Get unique hostnames
-                unique_hostnames = df['Hostname'].unique()
-                
-                # Create iterator with or without progress bar
-                hostname_iterator = tqdm(
-                    unique_hostnames,
-                    desc="    Processing instances",
-                    ncols=100
-                ) if show_progress else unique_hostnames
-                
-                # Group by hostname to handle multiple records per instance
+            if 'start_datetime' in df.columns and 'stop_datetime' in df.columns:
+                # Create timeline events for both start and stop times
                 timeline = []
-                for hostname in hostname_iterator:
-                    host_data = df[df['Hostname'] == hostname]
-                    
-                    # Get the earliest start and latest stop for each instance
-                    start = host_data['start_datetime'].min()
-                    stop = host_data['stop_datetime'].max()
-                    
-                    if pd.notna(start) and pd.notna(stop):
-                        timeline.append((start, 1))
-                        timeline.append((stop, -1))
+                for _, row in df.iterrows():
+                    if pd.notna(row['start_datetime']) and pd.notna(row['stop_datetime']):
+                        timeline.append((row['start_datetime'], 1))  # Start event
+                        timeline.append((row['stop_datetime'], -1))  # Stop event
                 
                 if timeline:
-                    # Sort by timestamp
                     timeline.sort(key=lambda x: x[0])
-                    
-                    # Calculate concurrent instances
                     current_count = 0
                     for _, count_change in timeline:
                         current_count += count_change
                         max_concurrent = max(max_concurrent, current_count)
-                    
+        
         except Exception as e:
             logger.warning(f"Error calculating max concurrent: {str(e)}")
         
@@ -693,131 +892,175 @@ class SecurityModuleAnalyzer:
         Calculate usage metrics across different environments and modules.
 
         Returns:
-            Dict: A dictionary containing metrics and statistics.
+            Dict: A dictionary containing comprehensive metrics and statistics.
         """
         if self.data is None:
             raise ValueError("No data loaded for analysis")
         
-        environments = sorted(self.data['Environment'].unique())
-        print(f"Calculating metrics for {len(environments)} environments...")
+        logger.info("Calculating comprehensive metrics...")
         
+        # Add has_modules column to the dataframe
+        self.data['has_modules'] = self.data[self.MODULE_COLUMNS].sum(axis=1) > 0
+        
+        # Calculate activated instances ONCE and store the result
+        activated_hosts = set(self.data[self.data['has_modules']]['Hostname'].unique())
+        total_hosts = set(self.data['Hostname'].unique())
+        
+        # Initialize metrics dictionary
         metrics = {
             'by_environment': {},
             'overall': {},
-            'trends': {}
+            'trends': {},
+            'overall_metrics': {}
         }
         
-        # Calculate module status and hours
-        self.data['has_modules'] = self.data[self.MODULE_COLUMNS].sum(axis=1) > 0
-        
-        # Calculate hours for activated and inactive instances
-        if 'Duration (Seconds)' in self.data.columns:
-            activated_hours = (self.data[self.data['has_modules']]['Duration (Seconds)'].sum()) / 3600
-            inactive_hours = (self.data[~self.data['has_modules']]['Duration (Seconds)'].sum()) / 3600
-            total_hours = activated_hours + inactive_hours
-        else:
-            activated_hours = 0
-            inactive_hours = 0
-            total_hours = 0
-        
         # Calculate overall metrics first
-        total_instances = len(self.data['Hostname'].unique())
-        activated_instances = len(self.data[self.data['has_modules']]['Hostname'].unique())
-        inactive_instances = total_instances - activated_instances
+        metrics['overall'] = {
+            'total_instances': len(total_hosts),
+            'activated_instances': len(activated_hosts),
+            'inactive_instances': len(total_hosts - activated_hosts),
+            'total_hours': self.data['Duration (Seconds)'].sum() / 3600 if 'Duration (Seconds)' in self.data.columns else 0,
+            'activated_hours': self.data[self.data['has_modules']]['Duration (Seconds)'].sum() / 3600 if 'Duration (Seconds)' in self.data.columns else 0,
+        }
+        metrics['overall']['inactive_hours'] = metrics['overall']['total_hours'] - metrics['overall']['activated_hours']
         
-        metrics['overall'].update({
-            'total_instances': total_instances,
-            'activated_instances': activated_instances,
-            'inactive_instances': inactive_instances,
-            'total_hours': total_hours,
-            'activated_hours': activated_hours,
-            'inactive_hours': inactive_hours
-        })
-        
-        # Calculate correlation matrix first
+        # Calculate correlation matrix
         correlation_matrix = self.data[self.MODULE_COLUMNS].corr()
         metrics['overall']['correlation_matrix'] = correlation_matrix.to_dict()
         
-        # Calculate metrics for each environment
+        # Calculate module usage
+        metrics['overall']['module_usage'] = {
+            col: int(self.data[col].sum()) for col in self.MODULE_COLUMNS
+        }
         
+        # Calculate environment distribution
+        environments = sorted(self.data['Environment'].unique())
+        env_distribution = {}
+        
+        logger.info("Calculating environment-specific metrics...")
         for env in environments:
-            env_df = self.data[self.data['Environment'] == env]
-            activated_instances = env_df[env_df[self.MODULE_COLUMNS].sum(axis=1) > 0]
-            inactive_instances = env_df[env_df[self.MODULE_COLUMNS].sum(axis=1) == 0]
+            env_data = self.data[self.data['Environment'] == env]
+            env_activated_hosts = set(env_data[env_data['has_modules']]['Hostname'].unique())
+            env_total_hosts = set(env_data['Hostname'].unique())
             
-            total_instances = len(env_df['Hostname'].unique())
-            module_usage_counts = {col: set(env_df[env_df[col] > 0]['Hostname']) for col in self.MODULE_COLUMNS}
+            # Calculate module usage for this environment
+            module_usage_counts = {
+                col: set(env_data[env_data[col] > 0]['Hostname']) for col in self.MODULE_COLUMNS
+            }
             
             # Calculate module usage percentage
             module_usage_percentage = {}
             for module, instances in module_usage_counts.items():
                 unique_instance_count = len(instances)
-                percentage = (unique_instance_count / total_instances) * 100
+                percentage = (unique_instance_count / len(env_total_hosts)) * 100 if env_total_hosts else 0
                 module_usage_percentage[module] = percentage
             
-            # Calculate max concurrent instances
+            # Calculate max concurrent instances for environment
             max_concurrent = 0
-            if 'Duration (Seconds)' in env_df.columns:
-                grouped = env_df.groupby('Hostname')
-                max_concurrent = max(len(g) for _, g in grouped)
-                total_hours = env_df['Duration (Seconds)'].sum() / 3600
-            else:
-                total_hours = 0
+            if 'start_datetime' in env_data.columns and not env_data['start_datetime'].isna().all():
+                timeline = []
+                for hostname in env_total_hosts:
+                    host_data = env_data[env_data['Hostname'] == hostname]
+                    start = host_data['start_datetime'].min()
+                    stop = host_data['stop_datetime'].max()
+                    
+                    if pd.notna(start) and pd.notna(stop):
+                        timeline.append((start, 1))
+                        timeline.append((stop, -1))
+                
+                if timeline:
+                    timeline.sort(key=lambda x: x[0])
+                    current_count = 0
+                    for _, count_change in timeline:
+                        current_count += count_change
+                        max_concurrent = max(max_concurrent, current_count)
+            
+            # Calculate total utilization hours
+            total_hours = (env_data['Duration (Seconds)'].sum() / 3600) if 'Duration (Seconds)' in env_data.columns else 0
             
             metrics['by_environment'][env] = {
-                'activated_instances': len(activated_instances['Hostname'].unique()),
-                'inactive_instances': len(inactive_instances['Hostname'].unique()),
-                'total_instances': total_instances,
+                'total_instances': len(env_total_hosts),
+                'activated_instances': len(env_activated_hosts),
+                'inactive_instances': len(env_total_hosts - env_activated_hosts),
                 'module_usage': {col: len(module_usage_counts[col]) for col in self.MODULE_COLUMNS},
                 'module_usage_percentage': module_usage_percentage,
                 'most_common_module': max(
                     self.MODULE_COLUMNS,
                     key=lambda col: len(module_usage_counts[col])
                 ) if sum(len(instances) for instances in module_usage_counts.values()) > 0 else "None",
-                'avg_modules_per_host': env_df[self.MODULE_COLUMNS].sum(axis=1).mean(),
+                'avg_modules_per_host': env_data[self.MODULE_COLUMNS].sum(axis=1).mean(),
                 'max_concurrent': max_concurrent,
                 'total_utilization_hours': total_hours,
-                'correlation_matrix': env_df[self.MODULE_COLUMNS].corr().to_dict()  # Add per-environment correlation
+                'correlation_matrix': env_data[self.MODULE_COLUMNS].corr().to_dict()
             }
-        
-        # Calculate overall metrics
-        total_activated = len(self.data[self.data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
-        total_instances = len(self.data['Hostname'].unique())
-        
-        # Calculate hours with more detailed breakdown
-        activated_hours = 0
-        inactive_hours = 0
-        if 'Duration (Seconds)' in self.data.columns:
-            # Add column indicating if instance has any modules
-            self.data['has_modules'] = self.data[self.MODULE_COLUMNS].sum(axis=1) > 0
             
-            # Group by hostname and calculate max duration and module status
-            instance_hours = (self.data.groupby('Hostname')
-                             .agg({
-                                 'Duration (Seconds)': 'max',
-                                 'has_modules': 'any'
-                             }))
-            
-            # Calculate hours for activated and inactive instances
-            activated_hours = (instance_hours[instance_hours['has_modules']]['Duration (Seconds)'].sum()) / 3600
-            inactive_hours = (instance_hours[~instance_hours['has_modules']]['Duration (Seconds)'].sum()) / 3600
+            env_distribution[env] = len(env_total_hosts)
         
-        metrics['overall'].update({
-            'activated_instances': total_activated,
-            'inactive_instances': total_instances - total_activated,
-            'total_instances': total_instances,
-            'total_hours': activated_hours + inactive_hours,
-            'activated_hours': activated_hours,
-            'inactive_hours': inactive_hours,
-            'module_usage': {col: self.data[col].sum() for col in self.MODULE_COLUMNS},
-            'environment_distribution': {
-                env: metrics['by_environment'][env]['total_instances'] 
-                for env in environments
-            }
-        })
+        metrics['overall']['environment_distribution'] = env_distribution
+        
+        # Calculate overall max concurrent by checking each month
+        logger.info("Calculating overall max concurrent usage...")
+        overall_max_concurrent = 0
+        
+        # Get date range
+        min_date = self.data['start_datetime'].min()
+        max_date = self.data['start_datetime'].max()
+        
+        # Generate all months
+        all_months = pd.date_range(
+            start=min_date.replace(day=1),
+            end=max_date.replace(day=1),
+            freq='MS'
+        )
+        
+        # Calculate max concurrent for each month
+        for month_start in all_months:
+            month_end = month_start + pd.offsets.MonthEnd(1)
+            
+            # Get all records for this month
+            month_mask = (
+                (self.data['start_datetime'] <= month_end) & 
+                (self.data['stop_datetime'] >= month_start)
+            )
+            month_data = self.data[month_mask].copy()
+            
+            if not month_data.empty:
+                month_max = self._calculate_concurrent_usage(
+                    month_data,
+                    start_date=month_start,
+                    end_date=month_end
+                )
+                overall_max_concurrent = max(overall_max_concurrent, month_max)
+                logger.debug(f"Month {month_start.strftime('%Y-%m')}: Max Concurrent = {month_max}")
+        
+        logger.debug(f"Final Overall Max Concurrent: {overall_max_concurrent}")
+        
+        metrics['overall_metrics'] = {
+            'max_concurrent_overall': overall_max_concurrent,
+            'total_unique_instances': len(total_hosts),
+            'total_activated_instances': len(activated_hosts),
+            'total_inactive_instances': len(total_hosts - activated_hosts)
+        }
+        
+        # Validate metrics
+        try:
+            assert metrics['overall']['total_instances'] == metrics['overall']['activated_instances'] + metrics['overall']['inactive_instances'], \
+                "Total instances does not equal sum of activated and inactive instances"
+            
+            assert metrics['overall']['total_hours'] >= metrics['overall']['activated_hours'], \
+                "Total hours should be greater than or equal to activated hours"
+            
+            for key, value in metrics['overall'].items():
+                if isinstance(value, (int, float)):
+                    assert value >= 0, f"Negative value found in {key}: {value}"
+            
+            logger.info("Metrics validation passed")
+            
+        except AssertionError as e:
+            logger.warning(f"Metrics validation failed: {str(e)}")
         
         return metrics
-    
+  
     def calculate_overall_max_concurrent(self, df: pd.DataFrame, progress_bar=None) -> int:
         """Calculate the true overall max concurrent instances."""
         max_concurrent = 0
@@ -1324,16 +1567,16 @@ class SecurityModuleAnalyzer:
 
     def generate_report(self) -> None:
         """Generate a comprehensive HTML and PDF report of the analysis."""
-        # print("\nGenerating report...")
-        
         try:
-            # Stage 1: Calculate enhanced metrics
-            # print("  ↳ Calculating enhanced metrics...")
+            # Calculate enhanced metrics
             enhanced_metrics = self.calculate_enhanced_metrics()
             logger.debug(f"Enhanced Metrics: {enhanced_metrics}")
             
-            # Stage 2: Prepare metrics for template
-            print("  ↳ Preparing template data...")
+            # Calculate monthly metrics separately
+            monthly_metrics = self.calculate_monthly_metrics()
+            logger.debug(f"Monthly Metrics: {monthly_metrics}")
+            
+            # Prepare metrics for template
             combined_metrics = {
                 'overall_metrics': enhanced_metrics.get('overall_metrics', {}),
                 'utilization_metrics': enhanced_metrics.get('utilization_metrics', {}),
@@ -1342,205 +1585,45 @@ class SecurityModuleAnalyzer:
                 'overall': self.metrics.get('overall', {})
             }
             
-            # Ensure all required values exist with defaults
-            if 'overall' not in combined_metrics:
-                combined_metrics['overall'] = {}
-            
-            defaults = {
-                'total_instances': 0,
-                'activated_instances': 0,
-                'inactive_instances': 0,
-                'total_hours': 0.0,
-                'activated_hours': 0.0,
-                'inactive_hours': 0.0,
-            }
-            
-            # Set defaults for overall metrics
-            for key, default_value in defaults.items():
-                if key not in combined_metrics['overall']:
-                    combined_metrics['overall'][key] = default_value
-            
-            # Stage 3: Calculate monthly metrics with defaults
-            print("  ↳ Processing monthly data...")
-            # Get all months in the data
-            months = pd.date_range(
-                start=self.data['start_datetime'].min(),
-                end=self.data['start_datetime'].max(),
-                freq='MS'
-            ).to_period('M')
-            
-            monthly_metrics = {
-                'data': [],
-                'data_gaps': [],
-                'total_months': len(months),
-                'date_range': f"{months[0]} to {months[-1]}"
-            }
-            
-            # Process monthly data with progress bar
-            with tqdm(total=len(months), desc="    Processing months", ncols=100, position=0, leave=True) as pbar:
-                for month in months:
-                    pbar.set_description(f"    Processing {month}")
-                    
-                    # Filter data for this month
-                    month_mask = (
-                        (self.data['start_datetime'].dt.to_period('M') == month)
-                    )
-                    month_data = self.data[month_mask]
-                    
-                    if not month_data.empty:
-                        # Get unique hostnames for this month
-                        unique_hostnames = month_data['Hostname'].unique()
-                        
-                        # Show progress for larger datasets
-                        if len(unique_hostnames) > 1000:
-                            with tqdm(total=len(unique_hostnames), desc="      Building timeline", 
-                                    ncols=100, position=1, leave=False) as host_pbar:
-                                timeline = []
-                                for hostname in unique_hostnames:
-                                    host_data = month_data[month_data['Hostname'] == hostname]
-                                    start = host_data['start_datetime'].min()
-                                    stop = host_data['stop_datetime'].max()
-                                    
-                                    if pd.notna(start) and pd.notna(stop):
-                                        timeline.append((start, 1))
-                                        timeline.append((stop, -1))
-                                    host_pbar.update(1)
-                                
-                                if timeline:
-                                    host_pbar.set_description("      Sorting timeline")
-                                    timeline.sort(key=lambda x: x[0])
-                                    
-                                    host_pbar.set_description("      Calculating concurrent")
-                                    current_count = 0
-                                    max_concurrent = 0
-                                    for _, count_change in timeline:
-                                        current_count += count_change
-                                        max_concurrent = max(max_concurrent, current_count)
-                        else:
-                            # For smaller datasets, calculate without progress bar
-                            max_concurrent = self._calculate_max_concurrent(month_data)
-                        
-                        # Calculate other metrics
-                        activated_instances = len(month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname'].unique())
-                        avg_modules = month_data[self.MODULE_COLUMNS].sum(axis=1).mean()
-                        total_hours = (month_data['Duration (Seconds)'].sum() / 3600) if 'Duration (Seconds)' in month_data.columns else 0
-                        
-                        monthly_metrics['data'].append({
-                            'month': str(month),
-                            'activated_instances': activated_instances,
-                            'max_concurrent': max_concurrent,
-                            'avg_modules_per_host': avg_modules,
-                            'total_hours': total_hours
-                        })
-                    else:
-                        monthly_metrics['data_gaps'].append(str(month))
-                    
-                    pbar.update(1)
-
-            # Stage 4: Prepare report context
-            print("  ↳ Preparing final report...")
+            # Create report context
             report_context = {
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'metrics': {
-                    'overall': combined_metrics.get('overall', {
-                        'total_instances': 0,
-                        'activated_instances': 0,
-                        'inactive_instances': 0,
-                        'total_hours': 0.0,
-                        'activated_hours': 0.0,
-                        'inactive_hours': 0.0
-                    }),
-                    'overall_metrics': combined_metrics.get('overall_metrics', {
-                        'max_concurrent_overall': 0,
-                        'total_unique_instances': 0,
-                        'total_activated_instances': 0,
-                        'total_inactive_instances': 0
-                    }),
-                    'by_environment': combined_metrics.get('by_environment', {}),
-                    'monthly': monthly_metrics or {
-                        'data': [],
-                        'data_gaps': [],
-                        'total_months': 0,
-                        'date_range': 'No data available'
-                    }
+                    'overall': combined_metrics['overall'],
+                    'overall_metrics': combined_metrics['overall_metrics'],
+                    'by_environment': combined_metrics['by_environment'],
+                    'monthly': monthly_metrics
                 },
                 'unknown_patterns': []
             }
             
-            # Add unknown patterns if they exist
-            if 'Unknown' in self.metrics.get('by_environment', {}):
-                unknown_env = self.metrics['by_environment']['Unknown']
-                unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]
-                report_context['unknown_patterns'] = unknown_patterns
-            
-            # Ensure all environment metrics have required fields
-            for env in report_context['metrics']['by_environment']:
-                env_data = report_context['metrics']['by_environment'][env]
-                if not isinstance(env_data, dict):
-                    env_data = {}
-                
-                defaults = {
-                    'total_instances': 0,
-                    'activated_instances': 0,
-                    'inactive_instances': 0,
-                    'most_common_module': 'None',
-                    'max_concurrent': 0,
-                    'total_utilization_hours': 0.0
-                }
-                
-                for key, default_value in defaults.items():
-                    if key not in env_data:
-                        env_data[key] = default_value
-                
-                report_context['metrics']['by_environment'][env] = env_data
-            
-            # Convert metrics to serializable types
-            serializable_context = self._convert_to_serializable(report_context)
+            # Debug log the monthly metrics before rendering
+            logger.debug("Monthly metrics in report context:")
+            if monthly_metrics and 'data' in monthly_metrics:
+                for month_data in monthly_metrics['data']:
+                    logger.debug(
+                        f"Month: {month_data['month']}, "
+                        f"Activated: {month_data['activated_instances']}, "
+                        f"Max Concurrent: {month_data['max_concurrent']}"
+                    )
             
             # Add unknown patterns if they exist
             if 'Unknown' in self.metrics.get('by_environment', {}):
-                unknown_env = self.metrics['by_environment']['Unknown']
                 unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]
                 report_context['unknown_patterns'] = unknown_patterns
             
             # Convert metrics to serializable types
             serializable_context = self._convert_to_serializable(report_context)
             
-            # After preparing report_context
-            print("  ↳ Ensuring all template variables are defined...")
-            for env in report_context['metrics']['by_environment']:
-                env_data = report_context['metrics']['by_environment'][env]
-                if not isinstance(env_data, dict):
-                    env_data = {}
-                
-                defaults = {
-                    'total_instances': 0,
-                    'activated_instances': 0,
-                    'inactive_instances': 0,
-                    'most_common_module': 'None',
-                    'max_concurrent': 0,
-                    'total_utilization_hours': 0.0  # Ensure this is set
-                }
-                
-                for key, default_value in defaults.items():
-                    if key not in env_data or env_data[key] is None:
-                        env_data[key] = default_value
-                
-                report_context['metrics']['by_environment'][env] = env_data
-            
-            # Stage 5: Render HTML template
-            print("  ↳ Rendering HTML template...")
+            # Render template
             template = Template(self.REPORT_TEMPLATE)
-            report_html = template.render(**report_context)
+            report_html = template.render(**serializable_context)
             
-            # Stage 6: Save HTML Report
-            print("  ↳ Saving HTML report...")
+            # Save reports
             report_path = self.output_dir / 'report.html'
             with open(report_path, 'w', encoding='utf-8') as f:
                 f.write(report_html)
             
-            # Stage 7: Generate PDF Report
-            print("  ↳ Generating PDF report...")
             self.create_pdf_report(serializable_context, self.output_dir / 'report.pdf')
             
         except Exception as e:
