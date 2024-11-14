@@ -7,6 +7,7 @@ and generates comprehensive reports, including metrics, visualizations, and an H
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
 import seaborn as sns
 import sys
 import logging
@@ -295,6 +296,10 @@ class SecurityModuleAnalyzer:
                 <h3>Environment Distribution</h3>
                 <img src="environment_distribution.png" alt="Environment Distribution">
             </div>
+            <div class="visualization">
+                <h3>Growth of Activated Instances Over Time</h3>
+                <img src="activated_instances_growth.png" alt="Growth of Activated Instances">
+            </div>
         </div>
         
         <div class="section">
@@ -331,6 +336,10 @@ class SecurityModuleAnalyzer:
                 <tr>
                     <td>Max Concurrent Usage</td>
                     <td>{{ "{:,}".format(metrics.overall_metrics.max_concurrent_overall) }}</td>
+                </tr>
+                <tr>
+                    <td>Average Monthly Growth (Activated Instances)</td>
+                    <td>{{ "%.1f"|format(metrics.monthly.average_monthly_growth) }} instances</td>
                 </tr>
                 <tr>
                     <td>Unknown Environment Instances</td>
@@ -672,17 +681,6 @@ class SecurityModuleAnalyzer:
         return combined_df
     
     def _calculate_concurrent_usage(self, df: pd.DataFrame, start_date=None, end_date=None) -> int:
-        """
-        Calculate maximum concurrent usage for a given dataset and optional date range.
-        
-        Parameters:
-            df (pd.DataFrame): DataFrame containing the data
-            start_date (pd.Timestamp, optional): Start of period to consider
-            end_date (pd.Timestamp, optional): End of period to consider
-        
-        Returns:
-            int: Maximum concurrent usage
-        """
         max_concurrent = 0
         try:
             timeline = []
@@ -714,27 +712,19 @@ class SecurityModuleAnalyzer:
         return max_concurrent
 
     def calculate_monthly_metrics(self) -> Dict:
-        """
-        Calculate monthly metrics to identify trends and data gaps.
-        Uses consistent calculation methods with overall metrics.
-
-        Returns:
-            Dict: A dictionary containing monthly metrics and data gaps.
-        """
+        """Calculate monthly metrics including cumulative growth."""
         monthly_metrics = {
             'data': [],
             'data_gaps': [],
             'total_months': 0,
-            'date_range': ''
+            'date_range': '',
+            'average_monthly_growth': 0  # New field for average growth
         }
         
         try:
-            logger.info("Starting monthly metrics calculation...")
-            
-            # First, get all activated instances (these are instances that have any modules at any time)
+            # Get all activated instances (these are instances that have any modules at any time)
             activated_mask = self.data[self.MODULE_COLUMNS].sum(axis=1) > 0
             activated_instances = set(self.data[activated_mask]['Hostname'].unique())
-            logger.debug(f"Total activated instances: {len(activated_instances)}")
             
             # Get date range
             min_date = self.data['start_datetime'].min()
@@ -748,109 +738,81 @@ class SecurityModuleAnalyzer:
                 freq='MS'
             )
             
-            logger.info(f"Processing {len(all_months)} months of data...")
             monthly_data = []
-            overall_max_concurrent = 0
-            previous_month_instances = set()  # Track instances from previous month
+            cumulative_instances = set()  # Track cumulative instances
+            previous_month_count = 0  # For calculating monthly growth
+            total_growth = 0  # For calculating average growth
+            growth_months = 0  # Count months with growth
             
-            with tqdm(total=len(all_months), desc="Processing months", ncols=100) as pbar:
-                for month_start in all_months:
-                    month_end = month_start + pd.offsets.MonthEnd(1)
-                    
-                    # Get all records for this month
-                    month_mask = (
-                        (self.data['start_datetime'] <= month_end) & 
-                        (self.data['stop_datetime'] >= month_start)
+            for month_start in all_months:
+                month_end = month_start + pd.offsets.MonthEnd(1)
+                
+                # Get all records for this month
+                month_mask = (
+                    (self.data['start_datetime'] <= month_end) & 
+                    (self.data['stop_datetime'] >= month_start)
+                )
+                month_data = self.data[month_mask].copy()
+                
+                if not month_data.empty:
+                    # Get activated instances for this month
+                    monthly_activated = set(
+                        month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname']
                     )
-                    month_data = self.data[month_mask].copy()
                     
-                    if not month_data.empty:
-                        # Get activated instances that had activity this month
-                        monthly_hosts = set(month_data['Hostname'].unique())
-                        active_and_activated = monthly_hosts.intersection(activated_instances)
-                        
-                        # Calculate instance changes
-                        new_instances = active_and_activated - previous_month_instances
-                        lost_instances = previous_month_instances - active_and_activated
-                        
-                        # Calculate max concurrent using helper method
-                        max_concurrent = self._calculate_concurrent_usage(
-                            month_data,
-                            start_date=month_start,
-                            end_date=month_end
-                        )
-                        overall_max_concurrent = max(overall_max_concurrent, max_concurrent)
-                        
-                        # Calculate average modules for activated instances only
-                        activated_data = month_data[month_data['Hostname'].isin(active_and_activated)]
-                        avg_modules = (
-                            activated_data[self.MODULE_COLUMNS].sum(axis=1).mean()
-                            if not activated_data.empty else 0
-                        )
-                        
-                        # Calculate total hours
-                        if 'Duration (Seconds)' in month_data.columns:
-                            total_hours = month_data['Duration (Seconds)'].sum() / 3600
-                        else:
-                            # Calculate from datetime if Duration not available
-                            durations = month_data.apply(
-                                lambda row: min(row['stop_datetime'], month_end) - 
-                                        max(row['start_datetime'], month_start),
-                                axis=1
-                            )
-                            total_hours = durations.dt.total_seconds().sum() / 3600
-                        
-                        data = {
-                            'month': month_start.strftime('%Y-%m'),
-                            'activated_instances': len(active_and_activated),
-                            'new_instances': len(new_instances),
-                            'lost_instances': len(lost_instances),
-                            'max_concurrent': max_concurrent,
-                            'avg_modules_per_host': avg_modules,
-                            'total_hours': total_hours
-                        }
-                        monthly_data.append(data)
-                        
-                        logger.debug(
-                            f"Month {month_start.strftime('%Y-%m')}: "
-                            f"Active={len(monthly_hosts)}, "
-                            f"Activated={len(active_and_activated)}, "
-                            f"New={len(new_instances)}, "
-                            f"Lost={len(lost_instances)}, "
-                            f"Max Concurrent={max_concurrent}"
-                        )
-                        
-                        pbar.set_description(
-                            f"Processing {month_start.strftime('%Y-%m')} "
-                            f"({len(active_and_activated)}/{len(monthly_hosts)} activated)"
-                        )
-                        
-                        # Store current instances for next iteration
-                        previous_month_instances = active_and_activated
-                    else:
-                        monthly_metrics['data_gaps'].append(month_start.strftime('%Y-%m'))
+                    # Add to cumulative set
+                    cumulative_instances.update(monthly_activated)
                     
-                    pbar.update(1)
+                    # Calculate growth from previous month
+                    current_count = len(cumulative_instances)
+                    monthly_growth = current_count - previous_month_count
+                    
+                    if previous_month_count > 0:  # Only count growth after first month
+                        total_growth += monthly_growth
+                        growth_months += 1
+                    
+                    # Calculate other metrics
+                    max_concurrent = self._calculate_concurrent_usage(
+                        month_data,
+                        start_date=month_start,
+                        end_date=month_end
+                    )
+                    
+                    avg_modules = (
+                        month_data[self.MODULE_COLUMNS].sum(axis=1).mean()
+                        if not month_data.empty else 0
+                    )
+                    
+                    total_hours = (
+                        month_data['Duration (Seconds)'].sum() / 3600
+                        if 'Duration (Seconds)' in month_data.columns
+                        else 0
+                    )
+                    
+                    monthly_data.append({
+                        'month': month_start.strftime('%Y-%m'),
+                        'activated_instances': current_count,  # Use cumulative count
+                        'new_instances': monthly_growth,
+                        'max_concurrent': max_concurrent,
+                        'avg_modules_per_host': avg_modules,
+                        'total_hours': total_hours
+                    })
+                    
+                    previous_month_count = current_count
+                else:
+                    monthly_metrics['data_gaps'].append(month_start.strftime('%Y-%m'))
             
-            # Sort monthly data by month string (should be in YYYY-MM format)
-            monthly_metrics['data'] = sorted(monthly_data, key=lambda x: x['month'], reverse=True)
+            # Calculate average monthly growth
+            if growth_months > 0:
+                monthly_metrics['average_monthly_growth'] = total_growth / growth_months
+            
+            monthly_metrics['data'] = sorted(monthly_data, key=lambda x: x['month'])
             monthly_metrics['total_months'] = len(monthly_data)
             
-            # Validate against overall metrics
-            if hasattr(self, 'metrics') and 'overall_metrics' in self.metrics:
-                overall_max = self.metrics['overall_metrics']['max_concurrent_overall']
-                if overall_max != overall_max_concurrent:
-                    logger.warning(
-                        f"Overall max concurrent ({overall_max}) differs from "
-                        f"highest monthly max concurrent ({overall_max_concurrent})"
-                    )
-            
-            logger.info("Monthly metrics calculation complete")
             return monthly_metrics
             
         except Exception as e:
             logger.error(f"Error calculating monthly metrics: {str(e)}")
-            logger.debug("Error details:", exc_info=True)
             return monthly_metrics
 
     def _calculate_max_concurrent(self, df: pd.DataFrame, show_progress: bool = False) -> int:
@@ -877,12 +839,6 @@ class SecurityModuleAnalyzer:
         return max_concurrent
 
     def calculate_metrics(self) -> Dict:
-        """
-        Calculate usage metrics across different environments and modules.
-
-        Returns:
-            Dict: A dictionary containing comprehensive metrics and statistics.
-        """
         if self.data is None:
             raise ValueError("No data loaded for analysis")
         
@@ -945,24 +901,7 @@ class SecurityModuleAnalyzer:
                 module_usage_percentage[module] = percentage
             
             # Calculate max concurrent instances for environment
-            max_concurrent = 0
-            if 'start_datetime' in env_data.columns and not env_data['start_datetime'].isna().all():
-                timeline = []
-                for hostname in env_total_hosts:
-                    host_data = env_data[env_data['Hostname'] == hostname]
-                    start = host_data['start_datetime'].min()
-                    stop = host_data['stop_datetime'].max()
-                    
-                    if pd.notna(start) and pd.notna(stop):
-                        timeline.append((start, 1))
-                        timeline.append((stop, -1))
-                
-                if timeline:
-                    timeline.sort(key=lambda x: x[0])
-                    current_count = 0
-                    for _, count_change in timeline:
-                        current_count += count_change
-                        max_concurrent = max(max_concurrent, current_count)
+            max_concurrent = self._calculate_concurrent_usage(env_data)
             
             # Calculate total utilization hours
             total_hours = (env_data['Duration (Seconds)'].sum() / 3600) if 'Duration (Seconds)' in env_data.columns else 0
@@ -989,40 +928,7 @@ class SecurityModuleAnalyzer:
         
         # Calculate overall max concurrent by checking each month
         logger.info("Calculating overall max concurrent usage...")
-        overall_max_concurrent = 0
-        
-        # Get date range
-        min_date = self.data['start_datetime'].min()
-        max_date = self.data['start_datetime'].max()
-        
-        # Generate all months
-        all_months = pd.date_range(
-            start=min_date.replace(day=1),
-            end=max_date.replace(day=1),
-            freq='MS'
-        )
-        
-        # Calculate max concurrent for each month
-        for month_start in all_months:
-            month_end = month_start + pd.offsets.MonthEnd(1)
-            
-            # Get all records for this month
-            month_mask = (
-                (self.data['start_datetime'] <= month_end) & 
-                (self.data['stop_datetime'] >= month_start)
-            )
-            month_data = self.data[month_mask].copy()
-            
-            if not month_data.empty:
-                month_max = self._calculate_concurrent_usage(
-                    month_data,
-                    start_date=month_start,
-                    end_date=month_end
-                )
-                overall_max_concurrent = max(overall_max_concurrent, month_max)
-                logger.debug(f"Month {month_start.strftime('%Y-%m')}: Max Concurrent = {month_max}")
-        
-        logger.debug(f"Final Overall Max Concurrent: {overall_max_concurrent}")
+        overall_max_concurrent = self._calculate_concurrent_usage(self.data)
         
         metrics['overall_metrics'] = {
             'max_concurrent_overall': overall_max_concurrent,
@@ -1293,7 +1199,7 @@ class SecurityModuleAnalyzer:
 
     def create_visualizations(self) -> Dict[str, plt.Figure]:
         """
-        Create visualizations to represent module usage and environment distribution.
+        Create visualizations to represent module usage, environment distribution, and growth of activated instances.
 
         Returns:
             Dict[str, plt.Figure]: A dictionary of visualization figures.
@@ -1301,61 +1207,70 @@ class SecurityModuleAnalyzer:
         visualizations = {}
         
         try:
-            # Set style parameters
-            plt.style.use('default')
-            colors = {
-                'Production': 'lightcoral',
-                'Development': 'lightgreen',
-                'Test': 'lightblue',
-                'Staging': 'lightsalmon',
-                'DR': 'lightgray',
-                'UAT': 'plum',
-                'Integration': 'wheat'
-            }
+            # Set Seaborn style
+            sns.set_style('darkgrid')  # Use Seaborn's 'darkgrid' style
             
-            # 1. Stacked Module Usage Bar Chart
-            fig1, ax1 = plt.subplots(figsize=(15, 8))
+            # Define a color palette for consistency
+            color_palette = sns.color_palette("Set2")
+            
+            # 1. Security Module Usage by Environment (Stacked Bar Chart)
+            fig1, ax1 = plt.subplots(figsize=(12, 8))
             module_cols = self.MODULE_COLUMNS
             env_data = {}
-            bottom = np.zeros(len(module_cols))
-            
-            for env in ['Production', 'Development', 'Test', 'Staging', 'Integration']:
+            for env in ['Production', 'Development', 'Test', 'Staging', 'Integration', 'DR', 'UAT']:
                 if env in self.metrics['by_environment']:
-                    env_data[env] = pd.Series(self.metrics['by_environment'][env]['module_usage'])
-                    ax1.bar(module_cols, env_data[env], 
-                           label=env, 
-                           color=colors.get(env, 'gray'),
-                           alpha=0.7,
-                           bottom=bottom)
-                    bottom += env_data[env]
-            
-            ax1.set_title('Security Module Usage Across Environments', pad=20)
-            ax1.set_xlabel('Security Modules')
-            ax1.set_ylabel('Usage Count')
-            ax1.legend(loc='upper right')
+                    env_data[env] = self.metrics['by_environment'][env]['module_usage']
+            module_usage_df = pd.DataFrame(env_data).fillna(0)
+            module_usage_df = module_usage_df[module_usage_df.columns[::-1]]  # Reverse for better stacking
+            module_usage_df.plot(kind='bar', stacked=True, ax=ax1, color=color_palette[:len(self.MODULE_COLUMNS)])
+            ax1.set_title('Security Module Usage Across Environments', fontsize=16, pad=20)
+            ax1.set_xlabel('Security Modules', fontsize=12)
+            ax1.set_ylabel('Usage Count', fontsize=12)
+            ax1.legend(title='Environment', bbox_to_anchor=(1.05, 1), loc='upper left')
             plt.xticks(rotation=45)
             plt.tight_layout()
             visualizations['module_usage'] = fig1
-            
-            # 2. Environment distribution pie chart
-            fig2, ax2 = plt.subplots(figsize=(12, 12))
+
+            # 2. Environment Distribution (Pie Chart)
+            fig2, ax2 = plt.subplots(figsize=(8, 8))
             env_counts = pd.Series(self.metrics['overall']['environment_distribution'])
-            wedges, texts, autotexts = ax2.pie(env_counts.values,
-                                              labels=env_counts.index,
-                                              autopct='%1.1f%%',
-                                              colors=[colors.get(env, 'gray') for env in env_counts.index])
-            ax2.set_title('Distribution of Environments')
-            plt.setp(autotexts, size=8, weight="bold")
-            plt.setp(texts, size=10)
+            colors_env = sns.color_palette("pastel")[0:len(env_counts)]
+            ax2.pie(env_counts.values, labels=env_counts.index, autopct='%1.1f%%', colors=colors_env, startangle=140)
+            ax2.set_title('Distribution of Environments', fontsize=16)
+            plt.tight_layout()
             visualizations['environment_distribution'] = fig2
-            
+
+            # 3. Growth of Activated Instances Over Time (Line Chart)  # **New Visualization**
+            if 'monthly' in self.metrics and 'data' in self.metrics['monthly']:
+                fig3, ax3 = plt.subplots(figsize=(12, 6))
+                monthly_data = sorted(self.metrics['monthly']['data'], key=lambda x: x['month'])
+                months = [datetime.strptime(month['month'], '%Y-%m') for month in monthly_data]
+                activated_instances = [month['activated_instances'] for month in monthly_data]
+                
+                # Plot cumulative growth
+                sns.lineplot(x=months, y=activated_instances, marker='o', ax=ax3, color='teal')
+                
+                # Add average monthly growth annotation
+                avg_growth = self.metrics['monthly'].get('average_monthly_growth', 0)
+                ax3.text(0.02, 0.98, f'Average Monthly Growth: {avg_growth:.1f} instances',
+                        transform=ax3.transAxes, fontsize=10, verticalalignment='top',
+                        bbox=dict(facecolor='white', alpha=0.8))
+                
+                ax3.set_title('Cumulative Growth of Activated Instances', fontsize=16, pad=20)
+                ax3.set_xlabel('Month', fontsize=12)
+                ax3.set_ylabel('Total Activated Instances', fontsize=12)
+                ax3.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%Y-%m'))
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                visualizations['activated_instances_growth'] = fig3
+            else:
+                logger.warning("Monthly data not available. Skipping 'activated_instances_growth' visualization.")
+
             # Save all visualizations
             for name, fig in visualizations.items():
-                fig.savefig(self.output_dir / f'{name}.png',
-                           dpi=300,
-                           bbox_inches='tight',
-                           facecolor='white',
-                           edgecolor='none')
+                fig_path = self.output_dir / f'{name}.png'
+                fig.savefig(fig_path, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+                logger.debug(f"Saved visualization '{name}' to '{fig_path}'")
             
             print(f"✓ Created {len(visualizations)} visualizations:")
             for name in visualizations.keys():
@@ -1453,7 +1368,7 @@ class SecurityModuleAnalyzer:
                     f"{data['activated_instances']}",
                     data['most_common_module'],
                     f"{data['max_concurrent'] if data['max_concurrent'] else 'None'}",
-                    f"{data['total_utilization_hours']:.1f}" if data['total_utilization_hours'] != "None" else "None"
+                    f"{data['total_utilization_hours']:.1f}" if isinstance(data['total_utilization_hours'], (int, float)) else "None"
                 ])
             table = Table(env_data, hAlign='LEFT')
             table.setStyle(TableStyle([
@@ -1471,14 +1386,20 @@ class SecurityModuleAnalyzer:
             # Module Usage Analysis
             story.append(Paragraph("Module Usage Analysis", styles['Heading2']))
             # Embed Module Usage Image
-            if 'module_usage.png' in [f.name for f in self.output_dir.glob('*')]:
+            if (self.output_dir / 'module_usage.png').exists():
                 img_path = self.output_dir / 'module_usage.png'
                 story.append(Image(str(img_path), width=6*inch, height=4*inch))
                 story.append(Spacer(1, 12))
             # Embed Environment Distribution Image
-            if 'environment_distribution.png' in [f.name for f in self.output_dir.glob('*')]:
+            if (self.output_dir / 'environment_distribution.png').exists():
                 img_path = self.output_dir / 'environment_distribution.png'
                 story.append(Image(str(img_path), width=6*inch, height=6*inch))
+                story.append(Spacer(1, 12))
+            # Embed Activated Instances Growth Image  # **New Visualization**
+            if (self.output_dir / 'activated_instances_growth.png').exists():
+                img_path = self.output_dir / 'activated_instances_growth.png'
+                story.append(Paragraph("Growth of Activated Instances Over Time", styles['Heading3']))
+                story.append(Image(str(img_path), width=6*inch, height=4*inch))
                 story.append(Spacer(1, 12))
 
             # Statistics Summary
@@ -1541,7 +1462,8 @@ class SecurityModuleAnalyzer:
                 story.append(Spacer(1, 12))
 
             # Unknown Environment Analysis
-            if context['metrics']['by_environment'].get('Unknown') and context['metrics']['by_environment']['Unknown']['total_instances'] > 0:
+            if context['metrics']['by_environment'].get('Unknown') and \
+               context['metrics']['by_environment']['Unknown']['total_instances'] > 0:
                 story.append(Paragraph("Unknown Environment Analysis", styles['Heading2']))
                 story.append(Paragraph(f"Number of hosts in unknown environment: {context['metrics']['by_environment']['Unknown']['total_instances']:,}", styles['Normal']))
                 story.append(Paragraph("Common patterns found in unknown hosts:", styles['Normal']))
@@ -1608,12 +1530,15 @@ class SecurityModuleAnalyzer:
             template = Template(self.REPORT_TEMPLATE)
             report_html = template.render(**serializable_context)
             
-            # Save reports
+            # Save HTML report
             report_path = self.output_dir / 'report.html'
             with open(report_path, 'w', encoding='utf-8') as f:
                 f.write(report_html)
+            logger.info(f"✓ Saved HTML report to '{report_path}'")
             
+            # Create PDF report
             self.create_pdf_report(serializable_context, self.output_dir / 'report.pdf')
+            logger.info(f"✓ Saved PDF report to '{self.output_dir / 'report.pdf'}'")
             
         except Exception as e:
             logger.error(f"Failed to generate report: {str(e)}")
@@ -1639,6 +1564,8 @@ class SecurityModuleAnalyzer:
             return float(obj)
         elif isinstance(obj, np.bool_):
             return bool(obj)
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
         else:
             return obj
 
@@ -1669,6 +1596,10 @@ class SecurityModuleAnalyzer:
             # Step 3: Calculate monthly metrics
             update_progress("Analyzing monthly trends...")
             monthly_metrics = self.calculate_monthly_metrics()
+            
+            # **Integrate monthly_metrics into self.metrics**
+            self.metrics['monthly'] = monthly_metrics
+            logger.debug(f"Integrated monthly_metrics into self.metrics: {self.metrics['monthly']}")
 
             # Step 4: Create visualizations
             update_progress("Generating visualizations...")
@@ -1684,6 +1615,7 @@ class SecurityModuleAnalyzer:
             # Save metrics to JSON
             with open(self.output_dir / 'metrics.json', 'w') as json_file:
                 json.dump(serializable_metrics, json_file, indent=4)
+                logger.info(f"✓ Saved metrics to '{self.output_dir / 'metrics.json'}'")
 
             # Single summary at the end
             results = {
