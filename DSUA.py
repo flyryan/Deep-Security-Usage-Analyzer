@@ -681,17 +681,6 @@ class SecurityModuleAnalyzer:
         return combined_df
     
     def _calculate_concurrent_usage(self, df: pd.DataFrame, start_date=None, end_date=None) -> int:
-        """
-        Calculate maximum concurrent usage for a given dataset and optional date range.
-        
-        Parameters:
-            df (pd.DataFrame): DataFrame containing the data
-            start_date (pd.Timestamp, optional): Start of period to consider
-            end_date (pd.Timestamp, optional): End of period to consider
-        
-        Returns:
-            int: Maximum concurrent usage
-        """
         max_concurrent = 0
         try:
             timeline = []
@@ -850,12 +839,6 @@ class SecurityModuleAnalyzer:
         return max_concurrent
 
     def calculate_metrics(self) -> Dict:
-        """
-        Calculate usage metrics across different environments and modules.
-
-        Returns:
-            Dict: A dictionary containing comprehensive metrics and statistics.
-        """
         if self.data is None:
             raise ValueError("No data loaded for analysis")
         
@@ -918,24 +901,7 @@ class SecurityModuleAnalyzer:
                 module_usage_percentage[module] = percentage
             
             # Calculate max concurrent instances for environment
-            max_concurrent = 0
-            if 'start_datetime' in env_data.columns and not env_data['start_datetime'].isna().all():
-                timeline = []
-                for hostname in env_total_hosts:
-                    host_data = env_data[env_data['Hostname'] == hostname]
-                    start = host_data['start_datetime'].min()
-                    stop = host_data['stop_datetime'].max()
-                    
-                    if pd.notna(start) and pd.notna(stop):
-                        timeline.append((start, 1))
-                        timeline.append((stop, -1))
-                
-                if timeline:
-                    timeline.sort(key=lambda x: x[0])
-                    current_count = 0
-                    for _, count_change in timeline:
-                        current_count += count_change
-                        max_concurrent = max(max_concurrent, current_count)
+            max_concurrent = self._calculate_concurrent_usage(env_data)
             
             # Calculate total utilization hours
             total_hours = (env_data['Duration (Seconds)'].sum() / 3600) if 'Duration (Seconds)' in env_data.columns else 0
@@ -962,40 +928,7 @@ class SecurityModuleAnalyzer:
         
         # Calculate overall max concurrent by checking each month
         logger.info("Calculating overall max concurrent usage...")
-        overall_max_concurrent = 0
-        
-        # Get date range
-        min_date = self.data['start_datetime'].min()
-        max_date = self.data['start_datetime'].max()
-        
-        # Generate all months
-        all_months = pd.date_range(
-            start=min_date.replace(day=1),
-            end=max_date.replace(day=1),
-            freq='MS'
-        )
-        
-        # Calculate max concurrent for each month
-        for month_start in all_months:
-            month_end = month_start + pd.offsets.MonthEnd(1)
-            
-            # Get all records for this month
-            month_mask = (
-                (self.data['start_datetime'] <= month_end) & 
-                (self.data['stop_datetime'] >= month_start)
-            )
-            month_data = self.data[month_mask].copy()
-            
-            if not month_data.empty:
-                month_max = self._calculate_concurrent_usage(
-                    month_data,
-                    start_date=month_start,
-                    end_date=month_end
-                )
-                overall_max_concurrent = max(overall_max_concurrent, month_max)
-                logger.debug(f"Month {month_start.strftime('%Y-%m')}: Max Concurrent = {month_max}")
-        
-        logger.debug(f"Final Overall Max Concurrent: {overall_max_concurrent}")
+        overall_max_concurrent = self._calculate_concurrent_usage(self.data)
         
         metrics['overall_metrics'] = {
             'max_concurrent_overall': overall_max_concurrent,
