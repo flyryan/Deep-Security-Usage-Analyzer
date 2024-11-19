@@ -249,10 +249,6 @@ class SecurityModuleAnalyzer:
                     <div class="metric-value">{{ metrics.overall.total_hours | default(0.0) | round(1) }}</div>
                     <div class="metric-label">Total Hours</div>
                 </div>
-                <div class="metric-card">
-                    <div class="metric-value">{{ metrics.overall_metrics.max_concurrent_overall | default(0) }}</div>
-                    <div class="metric-label">Max Concurrent Overall</div>
-                </div>
             </div>
         </div>
 
