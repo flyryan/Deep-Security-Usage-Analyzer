@@ -400,7 +400,7 @@ class SecurityModuleAnalyzer:
     </html>
     """
     
-    def __init__(self):
+    def __init__(self, start_date: Optional[str] = None, end_date: Optional[str] = None):
         """
         Initialize the Trend Micro Deep Security Usage Analyzer.
         Sets up directories for input and output, and prepares data structures for analysis.
@@ -446,6 +446,10 @@ class SecurityModuleAnalyzer:
             raise
         
         tqdm.pandas()  # Initialize tqdm for pandas
+
+        # Add time range parameters
+        self.start_date = pd.to_datetime(start_date) if start_date else None
+        self.end_date = pd.to_datetime(end_date) if end_date else None
 
     def classify_environment(self, hostname: str, source_env: Optional[str] = None) -> str:
         """
@@ -666,6 +670,17 @@ class SecurityModuleAnalyzer:
         logger.info(f"Unique hosts: {len(combined_df['Hostname'].unique()):,}")
         logger.info(f"Date range: {combined_df['start_datetime'].min()} to {combined_df['start_datetime'].max()}")
         logger.info(f"Environments found: {', '.join(sorted(combined_df['Environment'].unique()))}")
+
+        # After loading and initial preprocessing, apply time range filter
+        if self.start_date or self.end_date:
+            combined_df = self.filter_time_range(combined_df)
+            logger.info(f"Applying time range filter: {self.start_date} to {self.end_date}")
+            
+            # Log the effect of filtering
+            logger.info(f"Records after time range filtering: {len(combined_df)}")
+            logger.info(f"Date range in filtered data: "
+                       f"{combined_df['start_datetime'].min()} to "
+                       f"{combined_df['stop_datetime'].max()}")
         
         return combined_df
     
@@ -1645,12 +1660,52 @@ class SecurityModuleAnalyzer:
             print(f"\n❌ Error: {str(e)}")
             raise
 
+    def filter_time_range(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter and adjust data based on specified time range.
+        
+        Parameters:
+            df (pd.DataFrame): Input DataFrame
+            
+        Returns:
+            pd.DataFrame: Filtered and adjusted DataFrame
+        """
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError("Input must be a pandas DataFrame")
+
+        filtered_df = df.copy()
+        
+        if self.start_date:
+            # Remove records that end before start_date
+            filtered_df = filtered_df[filtered_df['stop_datetime'] >= self.start_date]
+            # Adjust start times that are before start_date
+            filtered_df.loc[filtered_df['start_datetime'] < self.start_date, 'start_datetime'] = self.start_date
+            
+        if self.end_date:
+            # Set end_date to 23:59:59 of the last day
+            end_date_with_time = pd.to_datetime(self.end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            # Remove records that start after end_date
+            filtered_df = filtered_df[filtered_df['start_datetime'] <= end_date_with_time]
+            # Adjust stop times that are after end_date
+            filtered_df.loc[filtered_df['stop_datetime'] > end_date_with_time, 'stop_datetime'] = end_date_with_time
+        
+        # Recalculate duration if needed
+        if 'Duration (Seconds)' in filtered_df.columns:
+            filtered_df['Duration (Seconds)'] = (
+            filtered_df['stop_datetime'] - filtered_df['start_datetime']
+            ).dt.total_seconds()
+        
+        return filtered_df
+
+# Example usage
 def main():
-    """
-    Main function to run the Trend Micro Deep Security Usage Analyzer.
-    """
+    """Main function with time range parameters."""
     try:
-        analyzer = SecurityModuleAnalyzer()
+        # Initialize with time range
+        analyzer = SecurityModuleAnalyzer(
+            start_date=None,  # Optional: specify start date in 'YYYY-MM-DD' format
+            end_date=None     # Optional: specify end date in 'YYYY-MM-DD' format
+        )
         analyzer.analyze()
     except Exception as e:
         logger.error(f"Analysis failed: {str(e)}")
