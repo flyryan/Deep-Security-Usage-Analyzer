@@ -246,7 +246,7 @@ class SecurityModuleAnalyzer:
                     <div class="metric-label">Inactive Instances</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">{{ metrics.overall.total_hours | default(0.0) | round(1) }}</div>
+                    <div class="metric-value">{{ "{:,.1f}".format(metrics.overall.total_hours | default(0.0) | round(1)) }}</div>
                     <div class="metric-label">Total Hours</div>
                 </div>
             </div>
@@ -272,7 +272,7 @@ class SecurityModuleAnalyzer:
                     <td>{{ data.max_concurrent if data.max_concurrent else 'None' }}</td>
                     <td>
                         {% if data.total_utilization_hours is defined and data.total_utilization_hours != 'N/A' %}
-                            {{ "%.1f"|format(data.total_utilization_hours) }}
+                            {{ "{:,.1f}".format(data.total_utilization_hours) }}
                         {% else %}
                             N/A
                         {% endif %}
@@ -909,7 +909,11 @@ class SecurityModuleAnalyzer:
             
             env_distribution[env] = len(env_total_hosts)
         
-        metrics['overall']['environment_distribution'] = env_distribution
+        metrics['overall']['environment_distribution'] = {
+            env: data['activated_instances']  # Use activated_instances instead of total_instances
+            for env, data in metrics['by_environment'].items()
+            if data['activated_instances'] > 0  # Only include environments with activated instances
+        }
         
         # Calculate overall max concurrent by checking each month
         logger.info("Calculating overall max concurrent usage...")
@@ -1219,9 +1223,23 @@ class SecurityModuleAnalyzer:
             # 2. Environment Distribution (Pie Chart)
             fig2, ax2 = plt.subplots(figsize=(8, 8))
             env_counts = pd.Series(self.metrics['overall']['environment_distribution'])
-            colors_env = sns.color_palette("pastel")[0:len(env_counts)]
-            ax2.pie(env_counts.values, labels=env_counts.index, autopct='%1.1f%%', colors=colors_env, startangle=140)
-            ax2.set_title('Distribution of Environments', fontsize=16)
+            if env_counts.sum() > 0:  # Ensure we have data to plot
+                colors_env = sns.color_palette("pastel")[0:len(env_counts)]
+                wedges, texts, autotexts = ax2.pie(env_counts.values, 
+                                                  labels=env_counts.index, 
+                                                  autopct='%1.1f%%',
+                                                  colors=colors_env, 
+                                                  startangle=140)
+                ax2.set_title('Distribution of Activated Instances by Environment', fontsize=16)
+                # Enhance legend readability
+                legend_labels = [f'{env}' for env in env_counts.index]
+                ax2.legend(wedges, legend_labels,
+                          title="Environments",
+                          loc="center left",
+                          bbox_to_anchor=(1, 0, 0.5, 1))
+            else:
+                ax2.text(0.5, 0.5, 'No activated instances found',
+                         ha='center', va='center')
             plt.tight_layout()
             visualizations['environment_distribution'] = fig2
 
