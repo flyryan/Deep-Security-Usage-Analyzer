@@ -61,22 +61,21 @@ The deduplication process ensures accuracy and efficiency:
    - Ensure only the files you wish to analyze are present
    - *Optional:* Use environment-specific naming patterns in filenames to aid classification
 
-2. **Optional: Set Time Range Parameters*
-  - Locate the `main()` function within the script.
-  - Modify the instantiation of the `SecurityModuleAnalyzer` class to include the `start_date` and `end_date` parameters if you wish to filter the data by a specific date range.
+2. **Optional: Set Time Range Parameters**
+   - Locate the `main()` function within the script.
+   - Modify the instantiation of the `SecurityModuleAnalyzer` class to include the `start_date` and `end_date` parameters if you wish to filter the data by a specific date range.
 
-  Example:
-  ```python
-  def main():
-     analyzer = SecurityModuleAnalyzer(
-        start_date="2024-01-01",  # Optional: Filter data from this date
-        end_date="2024-12-31"     # Optional: Filter data until this date
-     )
-     analyzer.run()
-  ```
+     ```python
+     def main():
+       analyzer = SecurityModuleAnalyzer(
+         start_date="2024-01-01",  # Optional: Filter data from this date
+         end_date="2024-12-31"     # Optional: Filter data until this date
+         )
+        analyzer.run()
+      ```
 
-  - Save the changes to `DSUA.py`.
-  - This step is optional and can be skipped if you want to analyze all available data without date filtering.
+   - Save the changes to `DSUA.py`.
+   - This step is optional and can be skipped if you want to analyze all available data without date filtering.
 
 3. **Run File Deduplication (Optional but Recommended):**
    ```bash
