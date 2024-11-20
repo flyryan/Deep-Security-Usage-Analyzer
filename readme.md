@@ -18,6 +18,7 @@ DSUA provides a clear understanding of module usage patterns by analyzing data e
 
 ## Prerequisites
 
+- Deep Security Security Module Usage Reports in CSV or Excel format
 - Python 3.7 - 3.12 (some dependencies currently don't support 3.13)
 - Required Python packages:
   - pandas
@@ -29,12 +30,11 @@ DSUA provides a clear understanding of module usage patterns by analyzing data e
   - xlrd
   - reportlab
   - tqdm
+- Install required Python packages using `requirements.txt`:
 
-Install the necessary packages using:
-
-```bash
-pip install -r requirements.txt
-```
+  ```bash
+  pip install -r requirements.txt
+  ```
 
 ## Features
 
@@ -67,7 +67,23 @@ The deduplication process ensures accuracy and efficiency:
    - Ensure only the files you wish to analyze are present
    - *Optional:* Use environment-specific naming patterns in filenames to aid classification
 
-2. **Run File Deduplication (Optional but Recommended):**
+2. **Optional: Set Time Range Parameters**
+   - Locate the `main()` function within the script.
+   - Modify the instantiation of the `SecurityModuleAnalyzer` class to include the `start_date` and `end_date` parameters if you wish to filter the data by a specific date range.
+
+     ```python
+     def main():
+       analyzer = SecurityModuleAnalyzer(
+         start_date="2024-01-01",  # Optional: Filter data from this date
+         end_date="2024-12-31"     # Optional: Filter data until this date
+         )
+        analyzer.run()
+      ```
+
+   - Save the changes to `DSUA.py`.
+   - This step is optional and can be skipped if you want to analyze all available data without date filtering.
+
+3. **Run File Deduplication (Optional but Recommended):**
    ```bash
    python dedupe.py
    ```
@@ -75,7 +91,7 @@ The deduplication process ensures accuracy and efficiency:
    - Automatically identifies and removes duplicate files
    - **Note:** Backup your data before running
 
-3. **Run DSUA:**
+4. **Run DSUA:**
    ```bash
    python DSUA.py
    ```
@@ -106,6 +122,13 @@ The deduplication process ensures accuracy and efficiency:
 - **Domain Classification:**
   - **Internal:** `10\.\d+\.\d+\.\d+`, `192\.168\.\d+\.\d+`, `172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+`, `\.internal\.`, `\.local\.`, `\.intranet\.`
   - **DMZ:** `dmz`, `perimeter`, `\.dmz\.`, `border`
+
+### Environment Classification Patterns
+
+- **File-based Classification**: The analyzer first attempts to determine environment from filename patterns
+- **Hostname-based Classification**: Falls back to analyzing hostname patterns
+- **Domain-based Classification**: Uses network domain patterns as additional context
+- **Default Classification**: Marks as "Unknown" if no pattern matches
 
 ### 3. Metric Calculations
 
@@ -182,13 +205,22 @@ The deduplication process ensures accuracy and efficiency:
   - Complete error tracebacks
   - Data validation results
 
-## Output
+## Analysis Output
 
-The following files are generated in the `output` directory:
+### Visualizations
+- **Module Usage**: Stacked bar chart showing security module usage across environments
+- **Environment Distribution**: Pie chart showing distribution of activated instances
+- **Activated Instances Growth**: Line chart showing growth of activated instances over time
 
-- `report.html`: Static HTML report with embedded visualizations
-- `report.pdf`: PDF version of the report
-- `metrics.json`: Complete metrics data in JSON format
+### Generated Reports
+- `report.html`: HTML report with embedded visualizations
+- `report.pdf`: Printer-friendly PDF version
+- `metrics.json`: Detailed metrics in JSON format including:
+  - Overall metrics
+  - Environment-specific metrics
+  - Monthly trends
+  - Utilization statistics
+  - Concurrent usage analysis
 - `module_usage.png`: Module usage visualization
 - `environment_distribution.png`: Environment distribution chart
 - `security_analysis.log`: Detailed execution log
