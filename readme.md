@@ -61,14 +61,22 @@ The deduplication process ensures accuracy and efficiency:
    - Ensure only the files you wish to analyze are present
    - *Optional:* Use environment-specific naming patterns in filenames to aid classification
 
-2. **Optional: Set Time Range Parameters**
-   ```python
-   # Modify DSUA.py main() function to specify date ranges:
-   analyzer = SecurityModuleAnalyzer(
-       start_date="2024-01-01",  # Optional: Filter data from this date
-       end_date="2024-12-31"     # Optional: Filter data until this date
-   )
-   ```
+2. **Optional: Set Time Range Parameters*
+  - Locate the `main()` function within the script.
+  - Modify the instantiation of the `SecurityModuleAnalyzer` class to include the `start_date` and `end_date` parameters if you wish to filter the data by a specific date range.
+
+  Example:
+  ```python
+  def main():
+     analyzer = SecurityModuleAnalyzer(
+        start_date="2024-01-01",  # Optional: Filter data from this date
+        end_date="2024-12-31"     # Optional: Filter data until this date
+     )
+     analyzer.run()
+  ```
+
+  - Save the changes to `DSUA.py`.
+  - This step is optional and can be skipped if you want to analyze all available data without date filtering.
 
 3. **Run File Deduplication (Optional but Recommended):**
    ```bash
@@ -116,17 +124,6 @@ The deduplication process ensures accuracy and efficiency:
 - **Hostname-based Classification**: Falls back to analyzing hostname patterns
 - **Domain-based Classification**: Uses network domain patterns as additional context
 - **Default Classification**: Marks as "Unknown" if no pattern matches
-
-Example patterns:
-```bash
-Production: prod, -prod, prd, production, live
-Development: dev, development, develop-
-Test: test, tst, qa, testing-
-Staging: stage, staging, stg
-UAT: uat, acceptance, user-acceptance
-Integration: int, integration
-DR: dr, disaster-recovery, backup-site
-```
 
 ### 3. Metric Calculations
 
