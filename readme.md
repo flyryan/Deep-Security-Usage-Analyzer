@@ -18,6 +18,7 @@ DSUA provides a clear understanding of module usage patterns by analyzing data e
 
 ## Prerequisites
 
+- Deep Security Security Module Usage Reports in CSV or Excel format
 - Python 3.7 - 3.12 (some dependencies currently don't support 3.13)
 - Required Python packages:
   - pandas
@@ -29,6 +30,11 @@ DSUA provides a clear understanding of module usage patterns by analyzing data e
   - xlrd
   - reportlab
   - tqdm
+- Install required Python packages using `requirements.txt`:
+
+  ```bash
+  pip install -r requirements.txt
+  ```
 
 ## Features
 
