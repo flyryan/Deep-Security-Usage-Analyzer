@@ -24,8 +24,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-import re  # Add this import at the top of the file if not already present
-from tqdm import tqdm  # Add this import at the top of the file if not already present
+import re
+from tqdm import tqdm
 
 # Custom logging formatter with colors and symbols
 class ColoredFormatter(logging.Formatter):
@@ -131,7 +131,6 @@ class SecurityModuleAnalyzer:
         ]
     }
     
-    # Add this as a class constant at the top of your SecurityModuleAnalyzer class
     REPORT_TEMPLATE = """
     <!DOCTYPE html>
     <html>
@@ -328,10 +327,6 @@ class SecurityModuleAnalyzer:
                 <tr>
                     <td>Hours for Instances without Modules</td>
                     <td>{{ "{:,.1f}".format(metrics.overall.inactive_hours) }}</td>
-                </tr>
-                <tr>
-                    <td>Max Concurrent Usage</td>
-                    <td>{{ "{:,}".format(metrics.overall_metrics.max_concurrent_overall) }}</td>
                 </tr>
                 <tr>
                     <td>Average Monthly Growth (Activated Instances)</td>
@@ -960,41 +955,6 @@ class SecurityModuleAnalyzer:
         
         return metrics
   
-    def calculate_overall_max_concurrent(self, df: pd.DataFrame, progress_bar=None) -> int:
-        """Calculate the true overall max concurrent instances."""
-        max_concurrent = 0
-        try:
-            if 'stop_datetime' in df.columns:
-                unique_hostnames = df['Hostname'].unique()
-                timeline = []
-                
-                # Iterate over hostnames directly, don't use progress_bar as iterator
-                for hostname in unique_hostnames:
-                    host_data = df[df['Hostname'] == hostname]
-                    start = host_data['start_datetime'].min()
-                    stop = host_data['stop_datetime'].max()
-                    
-                    if pd.notna(start) and pd.notna(stop):
-                        timeline.append((start, 1))
-                        timeline.append((stop, -1))
-                    
-                    if progress_bar is not None:
-                        progress_bar.update(1)
-                
-                if timeline:
-                    if progress_bar is not None:
-                        progress_bar.set_description("      Calculating concurrent usage")
-                    timeline.sort(key=lambda x: x[0])
-                    current_count = 0
-                    for _, count_change in timeline:
-                        current_count += count_change
-                        max_concurrent = max(max_concurrent, current_count)
-        
-        except Exception as e:
-            logger.warning(f"Error calculating max concurrent: {str(e)}")
-        
-        return max_concurrent
-
     def calculate_enhanced_metrics(self) -> Dict:
         """Calculate comprehensive metrics including utilization and realm statistics."""
         if self.data is None:
@@ -1047,7 +1007,6 @@ class SecurityModuleAnalyzer:
                 
                 # Update description with current realm
                 display_realm = realm[:40] + "..." if len(realm) > 43 else realm
-                pbar.set_description(f"    Processing {display_realm}")
                 
                 try:
                     # Calculate module usage
@@ -1164,12 +1123,12 @@ class SecurityModuleAnalyzer:
                 if len(unique_hostnames) > 1000:
                     with tqdm(total=len(unique_hostnames), desc="      Processing instances", 
                             ncols=100, position=1, leave=False) as instance_pbar:
-                        overall_max_concurrent = self.calculate_overall_max_concurrent(
+                        overall_max_concurrent = self._calculate_max_concurrent(
                             self.data, 
-                            progress_bar=instance_pbar
+                            show_progress=instance_pbar
                         )
                 else:
-                    overall_max_concurrent = self.calculate_overall_max_concurrent(self.data)
+                    overall_max_concurrent = self._calculate_max_concurrent(self.data)
                 metrics_pbar.update(1)
 
                 # Calculate instance counts
