@@ -673,8 +673,8 @@ class SecurityModuleAnalyzer:
 
         # After loading and initial preprocessing, apply time range filter
         if self.start_date or self.end_date:
+            logger.info(f"Applying time range filter: {self.start_date} to {self.end_date + pd.Timedelta(days=1,seconds=-1)}")
             combined_df = self.filter_time_range(combined_df)
-            logger.info(f"Applying time range filter: {self.start_date} to {self.end_date}")
             
             # Log the effect of filtering
             logger.info(f"Records after time range filtering: {len(combined_df)}")
