@@ -293,7 +293,7 @@ class SecurityModuleAnalyzer:
                 <img src="environment_distribution.png" alt="Environment Distribution">
             </div>
             <div class="visualization">
-                <h3>Growth of Activated Instances Over Time</h3>
+                <h3>Activated Instances Seen Monthly</h3>
                 <img src="activated_instances_growth.png" alt="Growth of Activated Instances">
             </div>
         </div>
@@ -361,9 +361,8 @@ class SecurityModuleAnalyzer:
                 <tr>
                     <th>Month</th>
                     <th>Activated Instances</th>
-                    <th>Max Concurrent</th>
+                    <th>Max Concurrent Instances</th>
                     <th>Avg Modules/Host</th>
-                    <th>Total Hours</th>
                 </tr>
                 {% if metrics.monthly and metrics.monthly.data %}
                     {% for month in metrics.monthly.data %}
@@ -371,15 +370,9 @@ class SecurityModuleAnalyzer:
                         <td>{{ month.month | default('None') }}</td>
                         <td>
                             {{ month.activated_instances | default(0) }}
-                            {% if month.new_instances is defined and month.lost_instances is defined %}
-                                {% if not loop.last %}
-                                    (+{{ month.new_instances }}/-{{ month.lost_instances }})
-                                {% endif %}
-                            {% endif %}
                         </td>
                         <td>{{ month.max_concurrent | default(0) }}</td>
                         <td>{{ "%.2f"|format(month.avg_modules_per_host | default(0.0)) }}</td>
-                        <td>{{ "%.1f"|format(month.total_hours | default(0.0)) }}</td>
                     </tr>
                     {% endfor %}
                 {% else %}
@@ -752,52 +745,48 @@ class SecurityModuleAnalyzer:
                 
                 if not month_data.empty:
                     # Get activated instances for this month
-                    monthly_activated = set(
-                        month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname']
-                    )
-                    
-                    # Add to cumulative set
-                    cumulative_instances.update(monthly_activated)
-                    
-                    # Calculate growth from previous month
-                    current_count = len(cumulative_instances)
-                    monthly_growth = current_count - previous_month_count
-                    
-                    if previous_month_count > 0:  # Only count growth after first month
-                        total_growth += monthly_growth
+                    activated_month_data = month_data[month_data[self.MODULE_COLUMNS].sum(axis=1) > 0]['Hostname']
+                    activated_month_data = month_data[month_data['has_modules']]
+                    activated_instances_current = set(activated_month_data['Hostname'].unique())
+
+                    # Calculate duration per instance without double counting
+                    duration_per_instance = activated_month_data.groupby('Hostname')['Duration (Seconds)'].sum()
+                    total_hours = duration_per_instance.sum() / 3600
+
+                    # Calculate average modules per host
+                    if not activated_month_data.empty:
+                        avg_modules_per_host = activated_month_data[self.MODULE_COLUMNS].sum(axis=1).mean()
+                    else:
+                        avg_modules_per_host = 0.0
+
+                    # Max concurrent instances in the month
+                    max_concurrent = self._calculate_concurrent_usage(activated_month_data)
+
+                    # Calculate new and lost instances
+                    new_instances = activated_instances_current - cumulative_instances
+                    lost_instances = cumulative_instances - activated_instances_current
+
+                    # Update cumulative instances
+                    cumulative_instances.update(activated_instances_current)
+
+                    # Calculate monthly growth
+                    current_month_count = len(activated_instances_current)
+                    growth = current_month_count - previous_month_count
+                    if growth > 0:
+                        total_growth += growth
                         growth_months += 1
-                    
-                    # Calculate other metrics
-                    max_concurrent = self._calculate_concurrent_usage(
-                        month_data,
-                        start_date=month_start,
-                        end_date=month_end
-                    )
-                    
-                    avg_modules = (
-                        month_data[self.MODULE_COLUMNS].sum(axis=1).mean()
-                        if not month_data.empty else 0
-                    )
-                    
-                    total_hours = (
-                        month_data['Duration (Seconds)'].sum() / 3600
-                        if 'Duration (Seconds)' in month_data.columns
-                        else 0
-                    )
-                    
+                    previous_month_count = current_month_count
+
+                    # Append metrics for the month
                     monthly_data.append({
                         'month': month_start.strftime('%Y-%m'),
-                        'activated_instances': current_count,  # Use cumulative count
-                        'new_instances': monthly_growth,
+                        'activated_instances': current_month_count,
+                        'new_instances': len(new_instances),
+                        'lost_instances': len(lost_instances),
                         'max_concurrent': max_concurrent,
-                        'avg_modules_per_host': avg_modules,
-                        'total_hours': total_hours
+                        'avg_modules_per_host': avg_modules_per_host,
+                        'total_hours': total_hours,
                     })
-                    
-                    previous_month_count = current_count
-                else:
-                    monthly_metrics['data_gaps'].append(month_start.strftime('%Y-%m'))
-            
             # Calculate average monthly growth
             if growth_months > 0:
                 monthly_metrics['average_monthly_growth'] = total_growth / growth_months
@@ -1252,7 +1241,7 @@ class SecurityModuleAnalyzer:
                         transform=ax3.transAxes, fontsize=10, verticalalignment='top',
                         bbox=dict(facecolor='white', alpha=0.8))
                 
-                ax3.set_title('Cumulative Growth of Activated Instances', fontsize=16, pad=20)
+                ax3.set_title('Total Activated Instances Seen by Month', fontsize=16, pad=20)
                 ax3.set_xlabel('Month', fontsize=12)
                 ax3.set_ylabel('Total Activated Instances', fontsize=12)
                 ax3.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%Y-%m'))
