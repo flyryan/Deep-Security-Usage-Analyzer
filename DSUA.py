@@ -1261,41 +1261,41 @@ class SecurityModuleAnalyzer:
 
     def embed_images_in_html(self, html_content: str, visualizations: Dict[str, plt.Figure]) -> str:
         """
-        Embed images directly into the HTML content as base64 strings.
+        Embed existing PNG files from the output directory into the HTML content as base64 strings.
 
         Parameters:
             html_content (str): The HTML content to embed images into.
-            visualizations (Dict[str, plt.Figure]): The visualizations to embed.
+            visualizations (Dict[str, plt.Figure]): Dictionary of visualization names (only used for names)
 
         Returns:
             str: The HTML content with embedded images.
         """
-        for name, fig in visualizations.items():
+        for name in visualizations.keys():
             try:
-                # Create a BytesIO buffer to store the image
-                buffer = BytesIO()
-                # Save the figure to the buffer in PNG format
-                fig.savefig(buffer, format='png', bbox_inches='tight', dpi=300)
-                buffer.seek(0)
+                # Get the path to the existing PNG file
+                png_path = self.output_dir / f'{name}.png'
                 
-                # Encode the image as base64
-                img_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                img_tag = f'data:image/png;base64,{img_str}'
-                
-                # Log the embedding process
-                logger.debug(f"Embedding image for {name}")
+                if png_path.exists():
+                    # Read the existing PNG file
+                    with open(png_path, 'rb') as img_file:
+                        img_data = img_file.read()
+                    
+                    # Encode the image as base64
+                    img_str = base64.b64encode(img_data).decode('utf-8')
+                    img_tag = f'data:image/png;base64,{img_str}'
+                    
+                    logger.debug(f"Embedding existing PNG for {name}")
 
-                # Replace image source with embedded base64 string
-                html_content = re.sub(
-                    rf'<img\s+src=["\']{re.escape(name)}\.png["\']\s+alt=["\'].*?["\']\s*/?>',
-                    f'<img src="{img_tag}" alt="{name.replace("_", " ").title()}">',
-                    html_content,
-                    flags=re.IGNORECASE
-                )
-                
-                # Close the buffer
-                buffer.close()
-                
+                    # Replace image source with embedded base64 string
+                    html_content = re.sub(
+                        rf'<img\s+src=["\']{re.escape(name)}\.png["\']\s+alt=["\'].*?["\']\s*/?>',
+                        f'<img src="{img_tag}" alt="{name.replace("_", " ").title()}">',
+                        html_content,
+                        flags=re.IGNORECASE
+                    )
+                else:
+                    logger.warning(f"PNG file not found for {name}: {png_path}")
+                    
             except Exception as e:
                 logger.error(f"Error embedding image {name}: {str(e)}")
                 continue
@@ -1478,8 +1478,12 @@ class SecurityModuleAnalyzer:
             monthly_metrics = self.calculate_monthly_metrics()
             logger.debug(f"Monthly Metrics: {monthly_metrics}")
             
-            # Create visualizations
-            visualizations = self.create_visualizations()
+            # Define visualization names that should exist
+            visualization_names = {
+                'module_usage': None,
+                'environment_distribution': None,
+                'activated_instances_growth': None
+            }
             
             # Prepare metrics for template
             combined_metrics = {
@@ -1514,8 +1518,8 @@ class SecurityModuleAnalyzer:
             template = Template(self.REPORT_TEMPLATE)
             report_html = template.render(**serializable_context)
             
-            # Embed images in HTML
-            report_html = self.embed_images_in_html(report_html, visualizations)
+            # Embed existing images in HTML
+            report_html = self.embed_images_in_html(report_html, visualization_names)
             
             # Save HTML report
             report_path = self.output_dir / 'report.html'
