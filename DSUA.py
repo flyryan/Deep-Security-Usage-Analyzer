@@ -1270,22 +1270,36 @@ class SecurityModuleAnalyzer:
         Returns:
             str: The HTML content with embedded images.
         """
-        for name, img in visualizations.items():
-            buffer = BytesIO()
-            plt.imsave(buffer, img, format='png')
-            buffer.seek(0)
-            img_str = base64.b64encode(buffer.read()).decode('utf-8')
-            img_tag = f'data:image/png;base64,{img_str}'
-            logger.debug(f"Embedding image for {name}: {img_tag[:100]}...")  # Log the first 100 characters of the base64 string
+        for name, fig in visualizations.items():
+            try:
+                # Create a BytesIO buffer to store the image
+                buffer = BytesIO()
+                # Save the figure to the buffer in PNG format
+                fig.savefig(buffer, format='png', bbox_inches='tight', dpi=300)
+                buffer.seek(0)
+                
+                # Encode the image as base64
+                img_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                img_tag = f'data:image/png;base64,{img_str}'
+                
+                # Log the embedding process
+                logger.debug(f"Embedding image for {name}")
 
-            # Replace image source with embedded base64 string
-            html_content = re.sub(
-                rf'<img\s+src=["\']{re.escape(name)}\.png["\']\s+alt=["\'].*?["\']\s*/?>',
-                f'<img src="{img_tag}" alt="{name.replace("_", " ").title()}">',
-                html_content,
-                flags=re.IGNORECASE
-            )
-        
+                # Replace image source with embedded base64 string
+                html_content = re.sub(
+                    rf'<img\s+src=["\']{re.escape(name)}\.png["\']\s+alt=["\'].*?["\']\s*/?>',
+                    f'<img src="{img_tag}" alt="{name.replace("_", " ").title()}">',
+                    html_content,
+                    flags=re.IGNORECASE
+                )
+                
+                # Close the buffer
+                buffer.close()
+                
+            except Exception as e:
+                logger.error(f"Error embedding image {name}: {str(e)}")
+                continue
+
         return html_content
 
     def create_pdf_report(self, context: Dict, pdf_path: Path) -> None:
@@ -1464,6 +1478,9 @@ class SecurityModuleAnalyzer:
             monthly_metrics = self.calculate_monthly_metrics()
             logger.debug(f"Monthly Metrics: {monthly_metrics}")
             
+            # Create visualizations
+            visualizations = self.create_visualizations()
+            
             # Prepare metrics for template
             combined_metrics = {
                 'overall_metrics': enhanced_metrics.get('overall_metrics', {}),
@@ -1485,16 +1502,6 @@ class SecurityModuleAnalyzer:
                 'unknown_patterns': []
             }
             
-            # Debug log the monthly metrics before rendering
-            logger.debug("Monthly metrics in report context:")
-            if monthly_metrics and 'data' in monthly_metrics:
-                for month_data in monthly_metrics['data']:
-                    logger.debug(
-                        f"Month: {month_data['month']}, "
-                        f"Activated: {month_data['activated_instances']}, "
-                        f"Max Concurrent: {month_data['max_concurrent']}"
-                    )
-            
             # Add unknown patterns if they exist
             if 'Unknown' in self.metrics.get('by_environment', {}):
                 unknown_patterns = list(self.data[self.data['Environment'] == 'Unknown']['Hostname'].unique())[:10]
@@ -1506,6 +1513,9 @@ class SecurityModuleAnalyzer:
             # Render template
             template = Template(self.REPORT_TEMPLATE)
             report_html = template.render(**serializable_context)
+            
+            # Embed images in HTML
+            report_html = self.embed_images_in_html(report_html, visualizations)
             
             # Save HTML report
             report_path = self.output_dir / 'report.html'
