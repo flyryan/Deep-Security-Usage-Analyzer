@@ -10,15 +10,15 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 from tqdm import tqdm
 
-from utils import (
+from .utils import (
     VALID_EXTENSIONS,
     MODULE_COLUMNS,
     classify_environment,
     convert_to_serializable,
     filter_time_range
 )
-from visualizations import create_visualizations
-from report_generator import generate_report
+from .visualizations import create_visualizations
+from .report_generator import generate_report
 
 logger = logging.getLogger(__name__)
 

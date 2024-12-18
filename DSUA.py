@@ -6,8 +6,8 @@ This script analyzes Trend Micro Deep Security module usage across different env
 and generates comprehensive reports, including metrics, visualizations, and an HTML report.
 """
 import sys
-from logging_config import setup_logging
-from analyzer import SecurityModuleAnalyzer
+from modules.logging_config import setup_logging
+from modules.analyzer import SecurityModuleAnalyzer
 
 def main():
     """Main function with time range parameters."""
