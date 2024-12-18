@@ -15,7 +15,9 @@
 
 # Ignore output directory
 /output/
+*.html
 .DS_Store
 
 # Ignore directories ending with env
 *env/
+

@@ -1677,7 +1677,7 @@ def main():
         # Initialize with time range
         analyzer = SecurityModuleAnalyzer(
             start_date=None,  # Optional: specify start date in 'YYYY-MM-DD' format
-            end_date=None     # Optional: specify end date in 'YYYY-MM-DD' format
+            end_date="2024-10-31"     # Optional: specify end date in 'YYYY-MM-DD' format
         )
         analyzer.analyze()
     except Exception as e:
