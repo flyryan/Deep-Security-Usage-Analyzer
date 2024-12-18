@@ -18,7 +18,7 @@ from .utils import (
     filter_time_range
 )
 from .visualizations import create_visualizations
-from .report_generator import generate_report
+from .report_generator import generate_reports  # Updated import
 
 logger = logging.getLogger(__name__)
 
@@ -566,7 +566,7 @@ class SecurityModuleAnalyzer:
 
             # Step 5: Generate report
             update_progress("Generating final report...")
-            generate_report(self.metrics, self.output_dir, visualizations)
+            generate_reports(self.metrics, self.output_dir, visualizations)  # Updated function name
 
             # Convert metrics to serializable types
             serializable_metrics = convert_to_serializable(self.metrics)
