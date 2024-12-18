@@ -10,9 +10,9 @@ from typing import Optional
 
 from .data_loader import load_and_preprocess_data
 from .metrics_calculator import calculate_all_metrics
-from .utils import convert_to_serializable
-from .visualizations import create_visualizations
-from .report_generator import generate_reports
+from ..utils import convert_to_serializable
+from ..visualizations import create_visualizations
+from ..report_generator import generate_reports
 
 logger = logging.getLogger(__name__)
 

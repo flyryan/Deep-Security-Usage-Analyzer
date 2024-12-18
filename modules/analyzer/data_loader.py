@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 from tqdm import tqdm
 
-from .utils import (
+from ..utils import (
     VALID_EXTENSIONS,
     MODULE_COLUMNS,
     classify_environment,

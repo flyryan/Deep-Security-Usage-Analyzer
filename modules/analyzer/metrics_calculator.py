@@ -4,8 +4,9 @@ Metrics calculation functionality for the Deep Security Usage Analyzer.
 import pandas as pd
 import logging
 from typing import Dict, Set
+
+from ..utils import MODULE_COLUMNS
 from .concurrent_calculator import calculate_concurrent_usage
-from .utils import MODULE_COLUMNS
 
 logger = logging.getLogger(__name__)
 
