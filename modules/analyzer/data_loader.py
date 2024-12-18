@@ -44,7 +44,7 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
             print(f"\rProcessing file {i}/{len(files)}: {file.name}" + " " * 50, end='')
             
             if file.suffix == '.csv':
-                df = pd.read_csv(file)
+                df = pd.read_csv(file, low_memory=False)  # Added low_memory=False to prevent DtypeWarning
             else:
                 df = pd.read_excel(file)
             
