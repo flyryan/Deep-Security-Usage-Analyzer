@@ -6,6 +6,7 @@ The Trend Micro Deep Security Usage Analyzer (DSUA) is a comprehensive tool desi
 
 - [Overview](#overview)
 - [Prerequisites](#prerequisites)
+- [Project Structure](#project-structure)
 - [Deduplication Process](#deduplication-process)
 - [Usage](#usage)
 - [Workflow](#workflow)
@@ -35,6 +36,49 @@ DSUA provides a clear understanding of module usage patterns by analyzing data e
   ```bash
   pip install -r requirements.txt
   ```
+
+## Project Structure
+
+The project follows a modular architecture for better organization and maintainability:
+
+```
+DSUA/
+├── DSUA.py                 # Main entry point
+├── dedupe.py              # File deduplication utility
+├── requirements.txt       # Project dependencies
+└── modules/              # Core modules directory
+    ├── __init__.py
+    ├── logging_config.py  # Logging configuration
+    ├── report_generator.py # Report generation orchestration
+    ├── utils.py          # Common utilities
+    ├── visualizations.py  # Visualization functions
+    ├── analyzer/         # Analysis module
+    │   ├── __init__.py
+    │   ├── analyzer.py   # Main analysis logic
+    │   ├── concurrent_calculator.py # Concurrent usage calculations
+    │   ├── data_loader.py # Data loading and preprocessing
+    │   └── metrics_calculator.py # Metrics computation
+    └── reporting/        # Report generation module
+        ├── __init__.py
+        ├── html_generator.py # HTML report generation
+        ├── pdf_generator.py  # PDF report generation
+        ├── image_handler.py  # Image processing
+        └── report_utils.py   # Common reporting utilities
+```
+
+### Core Modules
+
+- **analyzer**: Handles all data analysis operations
+  - `analyzer.py`: Main analysis orchestration
+  - `data_loader.py`: Data loading and preprocessing
+  - `metrics_calculator.py`: Computation of usage metrics
+  - `concurrent_calculator.py`: Concurrent usage analysis
+
+- **reporting**: Manages report generation
+  - `html_generator.py`: HTML report creation
+  - `pdf_generator.py`: PDF report creation
+  - `image_handler.py`: Image processing and embedding
+  - `report_utils.py`: Shared reporting utilities
 
 ## Features
 
