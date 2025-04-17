@@ -4,11 +4,27 @@ Metrics calculation functionality for the Deep Security Usage Analyzer.
 import pandas as pd
 import logging
 from typing import Dict, Set
+import json
+import os
 
 from ..utils import MODULE_COLUMNS
 from .concurrent_calculator import calculate_concurrent_usage
 
 logger = logging.getLogger(__name__)
+
+# Load activation_min_hours from config.json
+def _load_activation_min_hours():
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config.json")
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+        return float(config.get("activation_min_hours", 24))
+    except Exception as e:
+        logger.warning(f"Could not load activation_min_hours from config.json: {e}")
+        return 24.0
+
+ACTIVATION_MIN_HOURS = _load_activation_min_hours()
+ACTIVATION_MIN_SECONDS = ACTIVATION_MIN_HOURS * 3600
 
 def calculate_overall_metrics(data: pd.DataFrame) -> Dict:
     """Calculate overall metrics from the data."""
@@ -26,8 +42,12 @@ def calculate_overall_metrics(data: pd.DataFrame) -> Dict:
         }
     # 'has_modules' is now always present from preprocessing
     total_hosts = set(data['Hostname'].unique())
-    activated_hosts = set(data[data['has_modules']]['Hostname'].unique())
-    # Cache set difference
+    # New logic: Only count as activated if cumulative duration with has_modules is True >= threshold
+    if 'Duration (Seconds)' in data.columns:
+        module_time = data[data['has_modules']].groupby('Hostname')['Duration (Seconds)'].sum()
+        activated_hosts = set(module_time[module_time >= ACTIVATION_MIN_SECONDS].index)
+    else:
+        activated_hosts = set()
     inactive_hosts = total_hosts - activated_hosts
 
     metrics = {
@@ -71,7 +91,12 @@ def calculate_environment_metrics(data: pd.DataFrame, env: str) -> Dict:
             'correlation_matrix': {}
         }
     env_total_hosts = set(env_data['Hostname'].unique())
-    env_activated_hosts = set(env_data[env_data['has_modules']]['Hostname'].unique())
+    # New logic: Only count as activated if cumulative duration with has_modules is True >= threshold
+    if 'Duration (Seconds)' in env_data.columns:
+        module_time = env_data[env_data['has_modules']].groupby('Hostname')['Duration (Seconds)'].sum()
+        env_activated_hosts = set(module_time[module_time >= ACTIVATION_MIN_SECONDS].index)
+    else:
+        env_activated_hosts = set()
     inactive_hosts = env_total_hosts - env_activated_hosts
 
     # Calculate module usage for this environment
@@ -167,12 +192,14 @@ def calculate_monthly_metrics(data: pd.DataFrame, start_date: pd.Timestamp = Non
             month_data = data[month_mask].copy()
 
             if not month_data.empty:
-                # Get activated instances for this month
+                # Get activated instances for this month (using activation threshold)
                 activated_month_data = month_data[month_data[MODULE_COLUMNS].sum(axis=1) > 0]
-                activated_instances_current = set(activated_month_data['Hostname'].unique())
-
-                # Calculate duration per instance without double counting
-                duration_per_instance = activated_month_data.groupby('Hostname')['Duration (Seconds)'].sum()
+                if 'Duration (Seconds)' in activated_month_data.columns:
+                    duration_per_instance = activated_month_data.groupby('Hostname')['Duration (Seconds)'].sum()
+                    activated_instances_current = set(duration_per_instance[duration_per_instance >= ACTIVATION_MIN_SECONDS].index)
+                else:
+                    activated_instances_current = set()
+                    duration_per_instance = pd.Series(dtype=float)
                 total_hours = duration_per_instance.sum() / 3600
 
                 # Calculate average modules per host
