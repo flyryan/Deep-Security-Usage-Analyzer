@@ -16,7 +16,33 @@ from ..utils import (
 
 logger = logging.getLogger(__name__)
 
-def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp] = None, 
+def preprocess_df(df: pd.DataFrame, file_name: str = "") -> pd.DataFrame:
+    """
+    Centralized preprocessing for a single DataFrame:
+    - Adds missing module columns with zeros
+    - Fills NaNs and converts to int for module columns
+    - Adds 'has_modules' column
+    - Logs invalid values in module columns
+    """
+    # Standardize column names
+    df.columns = df.columns.str.strip()
+    # Add missing module columns and fill NaNs
+    for col in MODULE_COLUMNS:
+        if col not in df.columns:
+            df[col] = 0
+            logger.debug(f"Added missing module column {col} to {file_name}")
+        else:
+            df[col] = df[col].fillna(0).astype(int)
+        # Check for invalid values
+        invalid_values = df[col][(df[col] != 0) & (df[col] != 1)].unique()
+        if len(invalid_values) > 0:
+            logger.warning(f"Invalid values {invalid_values} found in column {col} of {file_name}. Setting them to 0.")
+            df.loc[(df[col] != 0) & (df[col] != 1), col] = 0
+    # Add 'has_modules' column
+    df['has_modules'] = df[MODULE_COLUMNS].sum(axis=1) > 0
+    return df
+
+def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp] = None,
                            end_date: Optional[pd.Timestamp] = None) -> pd.DataFrame:
     """
     Load data from files in the specified directory and preprocess it for analysis.
@@ -44,33 +70,24 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
             print(f"\rProcessing file {i}/{len(files)}: {file.name}" + " " * 50, end='')
             
             if file.suffix == '.csv':
-                df = pd.read_csv(file, low_memory=False)  # Added low_memory=False to prevent DtypeWarning
+                df = pd.read_csv(file, low_memory=False)
             else:
                 df = pd.read_excel(file)
             
-            # Standardize column names and handle dates
-            df.columns = df.columns.str.strip()
-            
-            # Add missing module columns with zeros and handle NaN values
-            for col in MODULE_COLUMNS:
-                if col not in df.columns:
-                    df[col] = 0
-                    logger.debug(f"Added missing module column {col} to {file.name}")
-                else:
-                    # Fill NaN values with 0 and convert to int
-                    df[col] = df[col].fillna(0).astype(int)
+            # Centralized preprocessing
+            df = preprocess_df(df, file.name)
             
             # Handle date columns
             if 'Start Date' in df.columns and 'Start Time' in df.columns:
                 try:
                     df['start_datetime'] = pd.to_datetime(
-                        df['Start Date'].astype(str) + ' ' + 
+                        df['Start Date'].astype(str) + ' ' +
                         df['Start Time'].astype(str),
                         format='mixed',
                         errors='coerce'
                     )
                     df['stop_datetime'] = pd.to_datetime(
-                        df['Stop Date'].astype(str) + ' ' + 
+                        df['Stop Date'].astype(str) + ' ' +
                         df['Stop Time'].astype(str),
                         format='mixed',
                         errors='coerce'
