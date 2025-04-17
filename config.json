@@ -1,0 +1,9 @@
+{
+  "common_services_selectors": [
+    "cce-aws-isobar",
+    "gcss-common-test",
+    "gcss-common-prod",
+    "CMNSVC",
+    "CMSVC"
+  ]
+}

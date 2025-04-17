@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 from tqdm import tqdm
+import json
+import os
 
 from ..utils import (
     VALID_EXTENSIONS,
@@ -16,6 +18,23 @@ from ..utils import (
 
 logger = logging.getLogger(__name__)
 
+# Load selectors from config.json or use defaults
+DEFAULT_SELECTORS = [
+    "cce-aws-isobar",
+    "gcss-common-test",
+    "gcss-common-prod",
+    "CMNSVC",
+    "CMSVC"
+]
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config.json")
+try:
+    with open(CONFIG_PATH, "r") as f:
+        config = json.load(f)
+        COMMON_SERVICES_SELECTORS = config.get("common_services_selectors", DEFAULT_SELECTORS)
+except Exception as e:
+    logger.warning(f"Could not load config.json, using default selectors. Error: {e}")
+    COMMON_SERVICES_SELECTORS = DEFAULT_SELECTORS
+
 def preprocess_df(df: pd.DataFrame, file_name: str = "") -> pd.DataFrame:
     """
     Centralized preprocessing for a single DataFrame:
@@ -23,6 +42,7 @@ def preprocess_df(df: pd.DataFrame, file_name: str = "") -> pd.DataFrame:
     - Fills NaNs and converts to int for module columns
     - Adds 'has_modules' column
     - Logs invalid values in module columns
+    - Adds 'service_category' column based on Computer Group selectors
     """
     # Standardize column names
     df.columns = df.columns.str.strip()
@@ -40,6 +60,18 @@ def preprocess_df(df: pd.DataFrame, file_name: str = "") -> pd.DataFrame:
             df.loc[(df[col] != 0) & (df[col] != 1), col] = 0
     # Add 'has_modules' column
     df['has_modules'] = df[MODULE_COLUMNS].sum(axis=1) > 0
+
+    # Add 'service_category' column
+    def categorize_service(computer_group):
+        if pd.isna(computer_group) or not isinstance(computer_group, str):
+            return "mission partners"
+        cg_lower = computer_group.lower()
+        for selector in COMMON_SERVICES_SELECTORS:
+            if selector.lower() in cg_lower:
+                return "common services"
+        return "mission partners"
+
+    df['service_category'] = df.get('Computer Group', pd.Series([None]*len(df))).apply(categorize_service)
     return df
 
 def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp] = None,

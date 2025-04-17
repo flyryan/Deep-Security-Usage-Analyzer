@@ -221,20 +221,21 @@ def calculate_monthly_metrics(data: pd.DataFrame, start_date: pd.Timestamp = Non
         return monthly_metrics
 
 def calculate_all_metrics(data: pd.DataFrame) -> Dict:
-    """Calculate all metrics from the loaded data."""
+    """Calculate all metrics from the loaded data, split by service_category."""
     if data is None or data.empty:
         raise ValueError("No data loaded for analysis or DataFrame is empty.")
 
     logger.info("Calculating comprehensive metrics...")
 
-    # 'has_modules' is now always present from preprocessing
+    # 'has_modules' and 'service_category' are now always present from preprocessing
 
     # Initialize metrics dictionary
     metrics = {
         'by_environment': {},
         'overall': {},
         'trends': {},
-        'overall_metrics': {}
+        'overall_metrics': {},
+        'by_service_category': {}
     }
 
     # Calculate overall metrics
@@ -270,6 +271,39 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
 
     # Calculate monthly metrics
     metrics['monthly'] = calculate_monthly_metrics(data)
+
+    # --- Split by service_category ---
+    service_categories = ["common services", "mission partners"]
+    for category in service_categories:
+        cat_data = data[data['service_category'] == category]
+        cat_metrics = {
+            'overall': calculate_overall_metrics(cat_data),
+            'by_environment': {},
+            'monthly': calculate_monthly_metrics(cat_data),
+            'overall_metrics': {}
+        }
+        # Environment metrics for this category
+        cat_envs = sorted(cat_data['Environment'].unique())
+        for env in cat_envs:
+            cat_metrics['by_environment'][env] = calculate_environment_metrics(cat_data, env)
+        # Environment distribution
+        cat_metrics['overall']['environment_distribution'] = {
+            env: env_data['activated_instances']
+            for env, env_data in cat_metrics['by_environment'].items()
+            if env_data['activated_instances'] > 0
+        }
+        # Max concurrent and instance sets
+        cat_max_concurrent = calculate_concurrent_usage(cat_data)
+        cat_all_hostnames = set(cat_data['Hostname'].unique())
+        cat_activated_hostnames = set(cat_data[cat_data['has_modules']]['Hostname'].unique())
+        cat_inactive_hostnames = cat_all_hostnames - cat_activated_hostnames
+        cat_metrics['overall_metrics'] = {
+            'max_concurrent_overall': cat_max_concurrent,
+            'total_unique_instances': len(cat_all_hostnames),
+            'total_activated_instances': len(cat_activated_hostnames),
+            'total_inactive_instances': len(cat_inactive_hostnames)
+        }
+        metrics['by_service_category'][category] = cat_metrics
 
     # Validate metrics
     try:
