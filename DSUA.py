@@ -17,7 +17,7 @@ def main():
         
         # Initialize analyzer with optional time range
         analyzer = SecurityModuleAnalyzer(
-            start_date=None,  # Optional: specify start date in 'YYYY-MM-DD' format
+            start_date='2025-01-01',  # Optional: specify start date in 'YYYY-MM-DD' format
             end_date=None     # Optional: specify end date in 'YYYY-MM-DD' format
         )
         
