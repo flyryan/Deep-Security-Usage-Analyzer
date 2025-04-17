@@ -49,6 +49,32 @@ def generate_pdf_report(metrics: Dict, output_dir: Path, visualizations: Dict[st
         story.append(table)
         story.append(Spacer(1, 24))
 
+        # Common Services Metrics
+        story.append(Paragraph("Common Services Metrics", styles['Heading2']))
+        cs = metrics['by_service_category']['common services']['overall']
+        cs_data = [
+            ["Total Unique Instances", f"{cs['total_instances']:,}"],
+            ["Activated Instances", f"{cs['activated_instances']:,}"],
+            ["Inactive Instances", f"{cs['inactive_instances']:,}"],
+            ["Total Hours", f"{cs['total_hours']:.1f}"]
+        ]
+        table = _create_table(cs_data)
+        story.append(table)
+        story.append(Spacer(1, 12))
+
+        # Mission Partners Metrics
+        story.append(Paragraph("Mission Partners Metrics", styles['Heading2']))
+        mp = metrics['by_service_category']['mission partners']['overall']
+        mp_data = [
+            ["Total Unique Instances", f"{mp['total_instances']:,}"],
+            ["Activated Instances", f"{mp['activated_instances']:,}"],
+            ["Inactive Instances", f"{mp['inactive_instances']:,}"],
+            ["Total Hours", f"{mp['total_hours']:.1f}"]
+        ]
+        table = _create_table(mp_data)
+        story.append(table)
+        story.append(Spacer(1, 12))
+
         # Environment Distribution
         story.append(Paragraph("Environment Distribution", styles['Heading2']))
         env_data = [["Environment", "Total Hosts", "Activated Hosts", "Most Used Module", "Max Concurrent", "Total Hours"]]
@@ -179,3 +205,33 @@ def _add_visualizations(story: list, output_dir: Path, visualizations: Dict[str,
         story.append(Paragraph("Growth of Activated Instances Over Time", getSampleStyleSheet()['Heading3']))
         story.append(Image(str(img_path), width=6*inch, height=4*inch))
         story.append(Spacer(1, 12))
+
+    # Activated Instances Comparison Image
+    if (output_dir / 'service_category_comparison.png').exists():
+        story.append(Paragraph("Activated Instances Comparison: Common Services vs. Mission Partners", getSampleStyleSheet()['Heading3']))
+        story.append(Image(str(output_dir / 'service_category_comparison.png'), width=5*inch, height=4*inch))
+        story.append(Spacer(1, 12))
+
+    # --- Service Category Split Visualizations ---
+    for category in ["common_services", "mission_partners"]:
+        pretty = "Common Services" if category == "common_services" else "Mission Partners"
+        # Heading
+        story.append(Paragraph(f"Module Usage Analysis: {pretty}", getSampleStyleSheet()['Heading2']))
+        # Module Usage
+        img_name = f"module_usage_{category}.png"
+        if (output_dir / img_name).exists():
+            story.append(Paragraph(f"Security Module Usage by Environment ({pretty})", getSampleStyleSheet()['Heading3']))
+            story.append(Image(str(output_dir / img_name), width=6*inch, height=4*inch))
+            story.append(Spacer(1, 12))
+        # Environment Distribution
+        img_name = f"environment_distribution_{category}.png"
+        if (output_dir / img_name).exists():
+            story.append(Paragraph(f"Environment Distribution ({pretty})", getSampleStyleSheet()['Heading3']))
+            story.append(Image(str(output_dir / img_name), width=6*inch, height=6*inch))
+            story.append(Spacer(1, 12))
+        # Activated Instances Growth
+        img_name = f"activated_instances_growth_{category}.png"
+        if (output_dir / img_name).exists():
+            story.append(Paragraph(f"Growth of Activated Instances Over Time ({pretty})", getSampleStyleSheet()['Heading3']))
+            story.append(Image(str(output_dir / img_name), width=6*inch, height=4*inch))
+            story.append(Spacer(1, 12))

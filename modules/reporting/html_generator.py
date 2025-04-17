@@ -127,6 +127,49 @@ REPORT_TEMPLATE = """
     </div>
 
     <div class="section">
+        <h2>Common Services Metrics</h2>
+        <div class="grid">
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.by_service_category['common services'].overall.total_instances | default(0) }}</div>
+                <div class="metric-label">Total Unique Instances</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.by_service_category['common services'].overall.activated_instances | default(0) }}</div>
+                <div class="metric-label">Activated Instances</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.by_service_category['common services'].overall.inactive_instances | default(0) }}</div>
+                <div class="metric-label">Inactive Instances</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ "{:,.1f}".format(metrics.by_service_category['common services'].overall.total_hours | default(0.0) | round(1)) }}</div>
+                <div class="metric-label">Total Hours</div>
+            </div>
+        </div>
+    </div>
+    <div class="section">
+        <h2>Mission Partners Metrics</h2>
+        <div class="grid">
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.by_service_category['mission partners'].overall.total_instances | default(0) }}</div>
+                <div class="metric-label">Total Unique Instances</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.by_service_category['mission partners'].overall.activated_instances | default(0) }}</div>
+                <div class="metric-label">Activated Instances</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.by_service_category['mission partners'].overall.inactive_instances | default(0) }}</div>
+                <div class="metric-label">Inactive Instances</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ "{:,.1f}".format(metrics.by_service_category['mission partners'].overall.total_hours | default(0.0) | round(1)) }}</div>
+                <div class="metric-label">Total Hours</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
         <h2>Environment Distribution</h2>
         <table>
             <tr>
@@ -171,7 +214,43 @@ REPORT_TEMPLATE = """
             <img src="activated_instances_growth.png" alt="Growth of Activated Instances">
         </div>
     </div>
-    
+    <div class="visualization">
+        <h3>Activated Instances Comparison: Common Services vs. Mission Partners</h3>
+        <img src="service_category_comparison.png" alt="Service Category Comparison">
+    </div>
+
+    <div class="section">
+        <h2>Module Usage Analysis: Common Services</h2>
+        <div class="visualization">
+            <h3>Security Module Usage by Environment (Common Services)</h3>
+            <img src="module_usage_common_services.png" alt="Module Usage Common Services">
+        </div>
+        <div class="visualization">
+            <h3>Environment Distribution (Common Services)</h3>
+            <img src="environment_distribution_common_services.png" alt="Environment Distribution Common Services">
+        </div>
+        <div class="visualization">
+            <h3>Activated Instances Seen Monthly (Common Services)</h3>
+            <img src="activated_instances_growth_common_services.png" alt="Growth of Activated Instances Common Services">
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Module Usage Analysis: Mission Partners</h2>
+        <div class="visualization">
+            <h3>Security Module Usage by Environment (Mission Partners)</h3>
+            <img src="module_usage_mission_partners.png" alt="Module Usage Mission Partners">
+        </div>
+        <div class="visualization">
+            <h3>Environment Distribution (Mission Partners)</h3>
+            <img src="environment_distribution_mission_partners.png" alt="Environment Distribution Mission Partners">
+        </div>
+        <div class="visualization">
+            <h3>Activated Instances Seen Monthly (Mission Partners)</h3>
+            <img src="activated_instances_growth_mission_partners.png" alt="Growth of Activated Instances Mission Partners">
+        </div>
+    </div>
+
     <div class="section">
         <h2>Statistics Summary</h2>
         <table>
