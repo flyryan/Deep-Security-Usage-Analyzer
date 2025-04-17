@@ -6,4 +6,6 @@
     "CMNSVC",
     "CMSVC"
   ]
+,
+  "activation_min_hours": 168
 }
