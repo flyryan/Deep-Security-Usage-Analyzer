@@ -1,3 +1,5 @@
+import os
+
 """
 HTML report generation functionality for Deep Security Usage Analyzer.
 """
@@ -373,3 +375,436 @@ def generate_html_report(metrics: Dict) -> str:
     # Render template
     template = Template(REPORT_TEMPLATE)
     return template.render(**report_context)
+
+
+def write_interactive_report_html_embedded(metrics: dict, output_dir: str) -> None:
+    """
+    Write the interactive HTML report with metrics embedded as a JS variable.
+    Args:
+        metrics (dict): The metrics data to embed
+        output_dir (str): Path to the output directory
+    """
+    import json
+    metrics_json = json.dumps(metrics)
+    html_content = f'''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DSUA Interactive Report</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <style>
+        body {{ background: #f8f9fa; }}
+        .container {{ margin-top: 40px; }}
+        .section {{ background: #fff; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 32px;}}
+        .metric-card {{ background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 10px 0; }}
+        .metric-value {{ font-size: 24px; font-weight: bold; color: #2c3e50; }}
+        .metric-label {{ color: #666; font-size: 14px; margin-top: 5px; }}
+        .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }}
+        .table-responsive {{ margin-top: 20px; }}
+        .chart-container {{ background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 32px; }}
+        .timestamp {{ color: #666; font-style: italic; margin-bottom: 20px; }}
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1 class="mb-4">Deep Security Usage Analyzer Interactive Report</h1>
+    <p class="timestamp" id="timestamp"></p>
+    <div class="section" id="overall-metrics"></div>
+    <div class="section" id="common-services-metrics"></div>
+    <div class="section" id="mission-partners-metrics"></div>
+    <div class="section" id="environment-distribution"></div>
+    <div class="section" id="module-usage-analysis"></div>
+    <div class="section" id="service-category-comparison"></div>
+    <div class="section" id="statistics-summary"></div>
+    <div class="section" id="monthly-data-analysis"></div>
+    <div class="section" id="unknown-environment-analysis"></div>
+</div>
+<script>
+const metrics = {metrics_json};
+window.onload = function() {{
+    document.getElementById('timestamp').textContent = "Generated on: " + new Date().toLocaleString();
+    let overall = metrics.overall;
+    document.getElementById('overall-metrics').innerHTML = `
+        <h2>Overall Metrics</h2>
+        <div class="grid">
+            <div class="metric-card"><div class="metric-value">${{overall.total_instances}}</div><div class="metric-label">Total Unique Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${{overall.activated_instances}}</div><div class="metric-label">Activated Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${{overall.inactive_instances}}</div><div class="metric-label">Inactive Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${{overall.total_hours.toFixed(1)}}</div><div class="metric-label">Total Hours</div></div>
+        </div>
+    `;
+    let cs = metrics.by_service_category['common services'].overall;
+    document.getElementById('common-services-metrics').innerHTML = `
+        <h2>Common Services Metrics</h2>
+        <div class="grid">
+            <div class="metric-card"><div class="metric-value">${{cs.total_instances}}</div><div class="metric-label">Total Unique Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${{cs.activated_instances}}</div><div class="metric-label">Activated Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${{cs.inactive_instances}}</div><div class="metric-label">Inactive Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${{cs.total_hours.toFixed(1)}}</div><div class="metric-label">Total Hours</div></div>
+        </div>
+    `;
+    let mp = metrics.by_service_category['mission partners'].overall;
+    document.getElementById('mission-partners-metrics').innerHTML = `
+        <h2>Mission Partners Metrics</h2>
+        <div class="grid">
+            <div class="metric-card"><div class="metric-value">${{mp.total_instances}}</div><div class="metric-label">Total Unique Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${{mp.activated_instances}}</div><div class="metric-label">Activated Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${{mp.inactive_instances}}</div><div class="metric-label">Inactive Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${{mp.total_hours.toFixed(1)}}</div><div class="metric-label">Total Hours</div></div>
+        </div>
+    `;
+    let envRows = Object.entries(metrics.by_environment).map(([env, data]) => `
+        <tr>
+            <td>${{env}}</td>
+            <td>${{data.total_instances}}</td>
+            <td>${{data.activated_instances}}</td>
+            <td>${{data.most_common_module}}</td>
+            <td>${{data.max_concurrent ?? 'None'}}</td>
+            <td>${{data.total_utilization_hours !== undefined ? data.total_utilization_hours.toFixed(1) : 'N/A'}}</td>
+        </tr>
+    `).join('');
+    document.getElementById('environment-distribution').innerHTML = `
+        <h2>Environment Distribution</h2>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Environment</th>
+                        <th>Total Hosts</th>
+                        <th>Activated Hosts</th>
+                        <th>Most Used Module</th>
+                        <th>Max Concurrent</th>
+                        <th>Total Hours</th>
+                    </tr>
+                </thead>
+                <tbody>${{envRows}}</tbody>
+            </table>
+        </div>
+    `;
+    document.getElementById('module-usage-analysis').innerHTML = `
+        <h2>Module Usage Analysis</h2>
+        <div id="module-usage-chart" class="chart-container"></div>
+    `;
+    let moduleUsage = overall.module_usage;
+    let modules = Object.keys(moduleUsage);
+    let usageCounts = Object.values(moduleUsage);
+    Plotly.newPlot('module-usage-chart', [{{
+        x: modules,
+        y: usageCounts,
+        type: 'bar',
+        marker: {{ color: '#0d6efd' }}
+    }}], {{
+        title: 'Security Module Usage (Overall)',
+        yaxis: {{ title: 'Usage Count' }}
+    }}, {{responsive: true}});
+    let activatedCounts = [
+        cs.activated_instances,
+        mp.activated_instances
+    ];
+    Plotly.newPlot('service-category-comparison', [{{
+        labels: ['Common Services', 'Mission Partners'],
+        values: activatedCounts,
+        type: 'pie',
+        textinfo: 'label+percent+value'
+    }}], {{
+        title: 'Activated Instances Comparison: Common Services vs. Mission Partners'
+    }}, {{responsive: true}});
+    document.getElementById('statistics-summary').innerHTML = `
+        <h2>Statistics Summary</h2>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <tr><th>Metric</th><th>Value</th></tr>
+                <tr><td>Total Unique Instances</td><td>${{overall.total_instances}}</td></tr>
+                <tr><td>Instances Running at Least One Module</td><td>${{overall.activated_instances}}</td></tr>
+                <tr><td>Instances Not Running Any Modules</td><td>${{overall.inactive_instances}}</td></tr>
+                <tr><td>Total Hours</td><td>${{overall.total_hours.toFixed(1)}}</td></tr>
+                <tr><td>Hours for Instances with Modules</td><td>${{overall.activated_hours.toFixed(1)}}</td></tr>
+                <tr><td>Hours for Instances without Modules</td><td>${{overall.inactive_hours.toFixed(1)}}</td></tr>
+                <tr><td>Average Monthly Growth (Activated Instances)</td><td>${{metrics.monthly.average_monthly_growth.toFixed(1)}} instances</td></tr>
+                <tr><td>Unknown Environment Instances</td><td>${{metrics.by_environment.Unknown ? metrics.by_environment.Unknown.total_instances : 0}}</td></tr>
+            </table>
+        </div>
+    `;
+    let monthlyRows = (metrics.monthly.data || []).map(month => `
+        <tr>
+            <td>${{month.month}}</td>
+            <td>${{month.activated_instances}}</td>
+            <td>${{month.max_concurrent}}</td>
+            <td>${{month.avg_modules_per_host.toFixed(2)}}</td>
+        </tr>
+    `).join('');
+    document.getElementById('monthly-data-analysis').innerHTML = `
+        <h2>Monthly Data Analysis</h2>
+        <div class="grid">
+            <div class="metric-card"><div class="metric-value">${{metrics.monthly.total_months}}</div><div class="metric-label">Total Months with Data</div></div>
+            <div class="metric-card"><div class="metric-value">${{metrics.monthly.date_range}}</div><div class="metric-label">Date Range</div></div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Month</th>
+                        <th>Activated Instances</th>
+                        <th>Max Concurrent Instances</th>
+                        <th>Avg Modules/Host</th>
+                    </tr>
+                </thead>
+                <tbody>${{monthlyRows}}</tbody>
+            </table>
+        </div>
+    `;
+    if (metrics.by_environment.Unknown && metrics.by_environment.Unknown.total_instances > 0) {{
+        let patterns = (metrics.by_environment.Unknown.patterns || []).map(p => `<li>${{p}}</li>`).join('');
+        document.getElementById('unknown-environment-analysis').innerHTML = `
+            <div class="alert alert-warning">
+                <h2>Unknown Environment Analysis</h2>
+                <p>Number of hosts in unknown environment: ${{metrics.by_environment.Unknown.total_instances}}</p>
+                <p>Common patterns found in unknown hosts:</p>
+                <ul>${{patterns}}</ul>
+            </div>
+        `;
+    }}
+}};
+</script>
+</body>
+</html>
+'''
+    output_path = os.path.join(output_dir, 'interactive_report.html')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+
+
+def write_interactive_report_html(output_dir: str) -> None:
+    """
+    Write the interactive HTML report template to the output directory.
+    Args:
+        output_dir (str): Path to the output directory
+    """
+    html_content = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DSUA Interactive Report</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <style>
+        body { background: #f8f9fa; }
+        .container { margin-top: 40px; }
+        .section { background: #fff; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 32px;}
+        .metric-card { background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 10px 0; }
+        .metric-value { font-size: 24px; font-weight: bold; color: #2c3e50; }
+        .metric-label { color: #666; font-size: 14px; margin-top: 5px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
+        .table-responsive { margin-top: 20px; }
+        .chart-container { background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 32px; }
+        .timestamp { color: #666; font-style: italic; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1 class="mb-4">Deep Security Usage Analyzer Interactive Report</h1>
+    <p class="timestamp" id="timestamp"></p>
+    <div class="section" id="overall-metrics"></div>
+    <div class="section" id="common-services-metrics"></div>
+    <div class="section" id="mission-partners-metrics"></div>
+    <div class="section" id="environment-distribution"></div>
+    <div class="section" id="module-usage-analysis"></div>
+    <div class="section" id="service-category-comparison"></div>
+    <div class="section" id="statistics-summary"></div>
+    <div class="section" id="monthly-data-analysis"></div>
+    <div class="section" id="unknown-environment-analysis"></div>
+</div>
+<script>
+async function loadMetrics() {
+    let response = await fetch('metrics.json');
+    let metrics = await response.json();
+    renderReport(metrics);
+}
+function renderReport(metrics) {
+    document.getElementById('timestamp').textContent = "Generated on: " + new Date().toLocaleString();
+    let overall = metrics.overall;
+    document.getElementById('overall-metrics').innerHTML = `
+        <h2>Overall Metrics</h2>
+        <div class="grid">
+            <div class="metric-card"><div class="metric-value">${overall.total_instances}</div><div class="metric-label">Total Unique Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${overall.activated_instances}</div><div class="metric-label">Activated Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${overall.inactive_instances}</div><div class="metric-label">Inactive Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${overall.total_hours.toFixed(1)}</div><div class="metric-label">Total Hours</div></div>
+        </div>
+    `;
+    let cs = metrics.by_service_category['common services'].overall;
+    document.getElementById('common-services-metrics').innerHTML = `
+        <h2>Common Services Metrics</h2>
+        <div class="grid">
+            <div class="metric-card"><div class="metric-value">${cs.total_instances}</div><div class="metric-label">Total Unique Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${cs.activated_instances}</div><div class="metric-label">Activated Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${cs.inactive_instances}</div><div class="metric-label">Inactive Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${cs.total_hours.toFixed(1)}</div><div class="metric-label">Total Hours</div></div>
+        </div>
+    `;
+    let mp = metrics.by_service_category['mission partners'].overall;
+    document.getElementById('mission-partners-metrics').innerHTML = `
+        <h2>Mission Partners Metrics</h2>
+        <div class="grid">
+            <div class="metric-card"><div class="metric-value">${mp.total_instances}</div><div class="metric-label">Total Unique Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${mp.activated_instances}</div><div class="metric-label">Activated Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${mp.inactive_instances}</div><div class="metric-label">Inactive Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${mp.total_hours.toFixed(1)}</div><div class="metric-label">Total Hours</div></div>
+        </div>
+    `;
+    let envRows = Object.entries(metrics.by_environment).map(([env, data]) => `
+        <tr>
+            <td>${env}</td>
+            <td>${data.total_instances}</td>
+            <td>${data.activated_instances}</td>
+            <td>${data.most_common_module}</td>
+            <td>${data.max_concurrent ?? 'None'}</td>
+            <td>${data.total_utilization_hours !== undefined ? data.total_utilization_hours.toFixed(1) : 'N/A'}</td>
+        </tr>
+    `).join('');
+    document.getElementById('environment-distribution').innerHTML = `
+        <h2>Environment Distribution</h2>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Environment</th>
+                        <th>Total Hosts</th>
+                        <th>Activated Hosts</th>
+                        <th>Most Used Module</th>
+                        <th>Max Concurrent</th>
+                        <th>Total Hours</th>
+                    </tr>
+                </thead>
+                <tbody>${envRows}</tbody>
+            </table>
+        </div>
+    `;
+    document.getElementById('module-usage-analysis').innerHTML = `
+        <h2>Module Usage Analysis</h2>
+        <div id="module-usage-chart" class="chart-container"></div>
+    `;
+    let moduleUsage = overall.module_usage;
+    let modules = Object.keys(moduleUsage);
+    let usageCounts = Object.values(moduleUsage);
+    Plotly.newPlot('module-usage-chart', [{
+        x: modules,
+        y: usageCounts,
+        type: 'bar',
+        marker: { color: '#0d6efd' }
+    }], {
+        title: 'Security Module Usage (Overall)',
+        yaxis: { title: 'Usage Count' }
+    }, {responsive: true});
+    let activatedCounts = [
+        cs.activated_instances,
+        mp.activated_instances
+    ];
+    Plotly.newPlot('service-category-comparison', [{
+        labels: ['Common Services', 'Mission Partners'],
+        values: activatedCounts,
+        type: 'pie',
+        textinfo: 'label+percent+value'
+    }], {
+        title: 'Activated Instances Comparison: Common Services vs. Mission Partners'
+    }, {responsive: true});
+    document.getElementById('statistics-summary').innerHTML = `
+        <h2>Statistics Summary</h2>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <tr><th>Metric</th><th>Value</th></tr>
+                <tr><td>Total Unique Instances</td><td>${overall.total_instances}</td></tr>
+                <tr><td>Instances Running at Least One Module</td><td>${overall.activated_instances}</td></tr>
+                <tr><td>Instances Not Running Any Modules</td><td>${overall.inactive_instances}</td></tr>
+                <tr><td>Total Hours</td><td>${overall.total_hours.toFixed(1)}</td></tr>
+                <tr><td>Hours for Instances with Modules</td><td>${overall.activated_hours.toFixed(1)}</td></tr>
+                <tr><td>Hours for Instances without Modules</td><td>${overall.inactive_hours.toFixed(1)}</td></tr>
+                <tr><td>Average Monthly Growth (Activated Instances)</td><td>${metrics.monthly.average_monthly_growth.toFixed(1)} instances</td></tr>
+                <tr><td>Unknown Environment Instances</td><td>${metrics.by_environment.Unknown ? metrics.by_environment.Unknown.total_instances : 0}</td></tr>
+            </table>
+        </div>
+    `;
+    let monthlyRows = (metrics.monthly.data || []).map(month => `
+        <tr>
+            <td>${month.month}</td>
+            <td>${month.activated_instances}</td>
+            <td>${month.max_concurrent}</td>
+            <td>${month.avg_modules_per_host.toFixed(2)}</td>
+        </tr>
+    `).join('');
+    document.getElementById('monthly-data-analysis').innerHTML = `
+        <h2>Monthly Data Analysis</h2>
+        <div class="grid">
+            <div class="metric-card"><div class="metric-value">${metrics.monthly.total_months}</div><div class="metric-label">Total Months with Data</div></div>
+            <div class="metric-card"><div class="metric-value">${metrics.monthly.date_range}</div><div class="metric-label">Date Range</div></div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Month</th>
+                        <th>Activated Instances</th>
+                        <th>Max Concurrent Instances</th>
+                        <th>Avg Modules/Host</th>
+                    </tr>
+                </thead>
+                <tbody>${monthlyRows}</tbody>
+            </table>
+        </div>
+    `;
+    if (metrics.by_environment.Unknown && metrics.by_environment.Unknown.total_instances > 0) {
+        let patterns = (metrics.by_environment.Unknown.patterns || []).map(p => `<li>${p}</li>`).join('');
+        document.getElementById('unknown-environment-analysis').innerHTML = `
+            <div class="alert alert-warning">
+                <h2>Unknown Environment Analysis</h2>
+                <p>Number of hosts in unknown environment: ${metrics.by_environment.Unknown.total_instances}</p>
+                <p>Common patterns found in unknown hosts:</p>
+                <ul>${patterns}</ul>
+            </div>
+        `;
+    }
+}
+window.onload = loadMetrics;
+</script>
+</body>
+</html>
+'''
+    output_path = os.path.join(output_dir, 'interactive_report.html')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+
+
+def export_metrics_json(metrics: Dict, output_path: str) -> None:
+    """
+    Export the metrics dictionary as a JSON file for use in interactive reports.
+    Args:
+        metrics (Dict): The metrics data to export
+        output_path (str): Path to the output JSON file
+    """
+    import json
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
+
+
+
+def generate_modern_interactive_report(metrics: dict, template_path: str, output_path: str) -> None:
+    """
+    Generate a modern interactive HTML report by embedding metrics into the template.
+    Args:
+        metrics (dict): The metrics data to embed
+        template_path (str): Path to the HTML template file
+        output_path (str): Path to write the final HTML report
+    """
+    import json
+    with open(template_path, 'r', encoding='utf-8') as f:
+        template_html = f.read()
+    # Replace the placeholder for metrics assignment
+    metrics_json = json.dumps(metrics)
+    html_out = template_html.replace('let metrics = null; // Will be replaced with embedded JSON', f'let metrics = {metrics_json};')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_out)

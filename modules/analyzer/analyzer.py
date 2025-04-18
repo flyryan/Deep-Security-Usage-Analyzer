@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from .data_loader import load_and_preprocess_data
-from .metrics_calculator import calculate_all_metrics
+from .metrics_calculator import calculate_all_metrics, calculate_metrics_for_thresholds
 from ..utils import convert_to_serializable
 from ..visualizations import create_visualizations
 from ..report_generator import generate_reports
@@ -69,15 +69,21 @@ class SecurityModuleAnalyzer:
 
             # Step 2: Calculate metrics
             update_progress("Calculating metrics...")
-            self.metrics = calculate_all_metrics(self.data)
+            self.metrics = calculate_metrics_for_thresholds(self.data, [1, 12, 24, 48, 120, 168])
+
+            # Debug: print which thresholds succeeded
+            print(f"Available thresholds: {[k for k,v in self.metrics.items() if v is not None]}")
+            if self.metrics["24"] is None:
+                raise RuntimeError("Metrics for threshold 24 hours could not be calculated. Check earlier error messages for details.")
+
 
             # Step 3: Create visualizations
             update_progress("Generating visualizations...")
-            visualizations = create_visualizations(self.metrics, self.output_dir)
+            visualizations = create_visualizations(self.metrics["24"], self.output_dir)
 
             # Step 4: Generate report
             update_progress("Generating final report...")
-            generate_reports(self.metrics, self.output_dir, visualizations)
+            generate_reports(self.metrics["24"], self.output_dir, visualizations)
 
             # Step 5: Save metrics to JSON
             update_progress("Saving metrics...")
@@ -91,8 +97,9 @@ class SecurityModuleAnalyzer:
             print(f"✓ Processed {len(self.data):,} records from {len(self.data['Hostname'].unique()):,} unique hosts")
             print(f"✓ Report and visualizations saved to: {self.output_dir}")
 
-            if 'Unknown' in self.metrics['by_environment']:
-                unknown_count = self.metrics['by_environment']['Unknown']['total_instances']
+            default_metrics = self.metrics["24"]
+            if 'Unknown' in default_metrics['by_environment']:
+                unknown_count = default_metrics['by_environment']['Unknown']['total_instances']
                 print(f"⚠️  {unknown_count:,} hosts in unknown environment")
 
         except Exception as e:
