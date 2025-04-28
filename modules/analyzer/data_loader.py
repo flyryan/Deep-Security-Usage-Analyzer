@@ -43,6 +43,7 @@ def preprocess_df(df: pd.DataFrame, file_name: str = "") -> pd.DataFrame:
     - Adds 'has_modules' column
     - Logs invalid values in module columns
     - Adds 'service_category' column based on Computer Group selectors
+    - Adds 'cloud_provider' column based on filename/hostname patterns
     """
     # Standardize column names
     df.columns = df.columns.str.strip()
@@ -72,6 +73,49 @@ def preprocess_df(df: pd.DataFrame, file_name: str = "") -> pd.DataFrame:
         return "mission partners"
 
     df['service_category'] = df.get('Computer Group', pd.Series([None]*len(df))).apply(categorize_service)
+
+    # Add 'cloud_provider' column
+    def classify_cloud_provider(row):
+        # Priority: Source_Cloud_Provider, then filename, then hostname
+        provider = None
+        # Check Source_Cloud_Provider if present
+        if 'Source_Cloud_Provider' in row and pd.notna(row['Source_Cloud_Provider']):
+            provider = row['Source_Cloud_Provider']
+        # Check filename if available
+        elif 'File_Name' in row and isinstance(row['File_Name'], str):
+            fname = row['File_Name'].lower()
+            if 'aws' in fname:
+                provider = 'AWS'
+            elif 'azure' in fname:
+                provider = 'Azure'
+            elif 'gcp' in fname:
+                provider = 'GCP'
+            elif 'oci' in fname:
+                provider = 'OCI'
+        # Check hostname if available
+        elif 'Hostname' in row and isinstance(row['Hostname'], str):
+            h = row['Hostname'].lower()
+            if 'aws' in h:
+                provider = 'AWS'
+            elif 'azure' in h:
+                provider = 'Azure'
+            elif 'gcp' in h:
+                provider = 'GCP'
+            elif 'oci' in h:
+                provider = 'OCI'
+        if provider is None:
+            provider = 'Unknown'
+        return provider
+
+    # If File_Name column is not present, add it for row-wise classification
+    if 'File_Name' not in df.columns:
+        df['File_Name'] = file_name
+
+    # If Source_Cloud_Provider is not present, fill with None
+    if 'Source_Cloud_Provider' not in df.columns:
+        df['Source_Cloud_Provider'] = None
+
+    df['cloud_provider'] = df.apply(classify_cloud_provider, axis=1)
     return df
 
 def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp] = None,
@@ -106,9 +150,25 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
             else:
                 df = pd.read_excel(file)
             
+            # Extract cloud provider from filename
+            cloud_provider = None
+            filename = file.name.lower()
+            if 'aws' in filename:
+                cloud_provider = 'AWS'
+            elif 'azure' in filename:
+                cloud_provider = 'Azure'
+            elif 'gcp' in filename:
+                cloud_provider = 'GCP'
+            elif 'oci' in filename:
+                cloud_provider = 'OCI'
+            else:
+                cloud_provider = 'Unknown'
+
             # Centralized preprocessing
             df = preprocess_df(df, file.name)
-            
+            # Add 'Source_Cloud_Provider' column
+            df['Source_Cloud_Provider'] = cloud_provider
+
             # Handle date columns
             if 'Start Date' in df.columns and 'Start Time' in df.columns:
                 try:
@@ -147,7 +207,6 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
             
             # Extract environment from filename
             env = None
-            filename = file.name.lower()
             if 'dev' in filename or 'development' in filename:
                 env = 'Development'
             elif 'prod' in filename or 'production' in filename:
@@ -199,6 +258,30 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
         lambda row: classify_environment(row['Hostname'], row['Source_Environment']),
         axis=1
     )
+
+    # Add progress meter for cloud provider classification
+    def classify_cloud_provider_final(row):
+        # Priority: cloud_provider column (from preprocessing), then Source_Cloud_Provider, then hostname
+        provider = None
+        if 'cloud_provider' in row and pd.notna(row['cloud_provider']):
+            provider = row['cloud_provider']
+        elif 'Source_Cloud_Provider' in row and pd.notna(row['Source_Cloud_Provider']):
+            provider = row['Source_Cloud_Provider']
+        elif 'Hostname' in row and isinstance(row['Hostname'], str):
+            h = row['Hostname'].lower()
+            if 'aws' in h:
+                provider = 'AWS'
+            elif 'azure' in h:
+                provider = 'Azure'
+            elif 'gcp' in h:
+                provider = 'GCP'
+            elif 'oci' in h:
+                provider = 'OCI'
+        if provider is None:
+            provider = 'Unknown'
+        return provider
+
+    combined_df['Cloud_Provider'] = combined_df.progress_apply(classify_cloud_provider_final, axis=1)
     
     # Remove duplicates
     original_len = len(combined_df)
@@ -232,6 +315,7 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
     logger.info(f"Unique hosts: {len(combined_df['Hostname'].unique()):,}")
     logger.info(f"Date range: {combined_df['start_datetime'].min()} to {combined_df['start_datetime'].max()}")
     logger.info(f"Environments found: {', '.join(sorted(combined_df['Environment'].unique()))}")
+    logger.info(f"Cloud Providers found: {', '.join(sorted(combined_df['Cloud_Provider'].unique()))}")
 
     # After loading and initial preprocessing, apply time range filter
     if start_date or end_date:

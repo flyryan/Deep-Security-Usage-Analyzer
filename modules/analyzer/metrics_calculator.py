@@ -251,17 +251,21 @@ def calculate_monthly_metrics(data: pd.DataFrame, start_date: pd.Timestamp = Non
     print(f"[DEBUG] Entering calculate_all_metrics with ACTIVATION_MIN_HOURS={ACTIVATION_MIN_HOURS}")
 
 def calculate_all_metrics(data: pd.DataFrame) -> Dict:
-    """Calculate all metrics from the loaded data, split by service_category."""
+    """Calculate all metrics from the loaded data, split by service_category and cloud_provider."""
     if data is None or data.empty:
         raise ValueError("No data loaded for analysis or DataFrame is empty.")
 
     logger.info("Calculating comprehensive metrics...")
 
-    # 'has_modules' and 'service_category' are now always present from preprocessing
+    # 'has_modules', 'service_category', and 'Cloud_Provider' are now always present from preprocessing
 
     # Initialize metrics dictionary
     metrics = {
         'by_environment': {},
+        'by_cloud_provider': {},
+        'by_cloud_and_environment': {},
+        'by_service_category_and_cloud_provider': {},
+        'by_service_category_and_cloud_and_env': {},
         'overall': {},
         'trends': {},
         'overall_metrics': {},
@@ -281,6 +285,24 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
 
     print(f"[DEBUG] Calculated environment metrics")
 
+    # Calculate cloud provider metrics
+    cloud_providers = sorted(data['Cloud_Provider'].unique())
+    for cp in cloud_providers:
+        cp_data = data[data['Cloud_Provider'] == cp]
+        metrics['by_cloud_provider'][cp] = calculate_overall_metrics(cp_data)
+
+    print(f"[DEBUG] Calculated cloud provider metrics")
+
+    # Calculate cloud+environment metrics
+    for cp in cloud_providers:
+        cp_data = data[data['Cloud_Provider'] == cp]
+        cp_envs = sorted(cp_data['Environment'].unique())
+        for env in cp_envs:
+            key = f"{cp}::{env}"
+            env_data = cp_data[cp_data['Environment'] == env]
+            metrics['by_cloud_and_environment'][key] = calculate_overall_metrics(env_data)
+
+    print(f"[DEBUG] Calculated cloud+environment metrics")
 
     # Calculate environment distribution
     metrics['overall']['environment_distribution'] = {
@@ -289,7 +311,14 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
         if env_data['activated_instances'] > 0
     }
 
-    print(f"[DEBUG] Calculated environment distribution")
+    # Calculate cloud provider distribution
+    metrics['overall']['cloud_provider_distribution'] = {
+        cp: cp_data['activated_instances']
+        for cp, cp_data in metrics['by_cloud_provider'].items()
+        if cp_data['activated_instances'] > 0
+    }
+
+    print(f"[DEBUG] Calculated environment and cloud provider distributions")
 
 
     # Calculate overall max concurrent
@@ -352,6 +381,17 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
             'total_inactive_instances': len(cat_inactive_hostnames)
         }
         metrics['by_service_category'][category] = cat_metrics
+
+        # --- Service category splits by cloud provider and by cloud+env ---
+        for cp in cloud_providers:
+            cat_cp_data = cat_data[cat_data['Cloud_Provider'] == cp]
+            key_cp = f"{category}::{cp}"
+            metrics['by_service_category_and_cloud_provider'][key_cp] = calculate_overall_metrics(cat_cp_data)
+            cp_envs = sorted(cat_cp_data['Environment'].unique())
+            for env in cp_envs:
+                key_cpe = f"{category}::{cp}::{env}"
+                cat_cp_env_data = cat_cp_data[cat_cp_data['Environment'] == env]
+                metrics['by_service_category_and_cloud_and_env'][key_cpe] = calculate_overall_metrics(cat_cp_env_data)
 
     print(f"[DEBUG] Calculated service_category metrics")
 
