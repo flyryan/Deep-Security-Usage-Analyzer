@@ -14,7 +14,17 @@ VALID_EXTENSIONS = {'.csv', '.xlsx', '.xls'}
 MODULE_COLUMNS = ['AM', 'WRS', 'DC', 'AC', 'IM', 'LI', 'FW', 'DPI', 'SAP']
 
 # Enhanced environment patterns with more specific matching
+# IL4, IL5, and C1D are checked first to give them priority
 ENVIRONMENT_PATTERNS = {
+    'IL4': [
+        'il4', '-il4-', 'il4-', '-il4'
+    ],
+    'IL5': [
+        'il5', '-il5-', 'il5-', '-il5'
+    ],
+    'C1D': [
+        'c1d', '-c1d-', 'c1d-', '-c1d'
+    ],
     'Production': [
         'prod', '-prod', 'prd', 'production',
         r'\bprd\d+\b', r'\bp\d+\b', 'live',

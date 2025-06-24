@@ -240,8 +240,15 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
                 df = df[~invalid_dates]
             
             # Extract environment from filename
+            # Check for IL4, IL5, and C1D first as they should take priority
             env = None
-            if 'dev' in filename or 'development' in filename:
+            if 'il4' in filename:
+                env = 'IL4'
+            elif 'il5' in filename:
+                env = 'IL5'
+            elif 'c1d' in filename:
+                env = 'C1D'
+            elif 'dev' in filename or 'development' in filename:
                 env = 'Development'
             elif 'prod' in filename or 'production' in filename:
                 env = 'Production'
