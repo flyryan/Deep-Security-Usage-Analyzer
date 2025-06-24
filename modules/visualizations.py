@@ -98,6 +98,32 @@ def create_visualizations(metrics: Dict, output_dir: Path) -> Dict[str, plt.Figu
         visualizations['service_category_comparison'] = fig_comp
 
         visualizations['environment_distribution'] = fig2
+        
+        # 5. Cloud Provider Distribution (Pie Chart)
+        fig_cloud, ax_cloud = plt.subplots(figsize=(8, 8))
+        if 'cloud_provider_distribution' in metrics['overall']:
+            cloud_counts = pd.Series(metrics['overall']['cloud_provider_distribution'])
+            if cloud_counts.sum() > 0:
+                colors_cloud = sns.color_palette("husl")[0:len(cloud_counts)]
+                wedges, texts, autotexts = ax_cloud.pie(cloud_counts.values,
+                                                   labels=cloud_counts.index,
+                                                   autopct='%1.1f%%',
+                                                   colors=colors_cloud,
+                                                   startangle=140)
+                ax_cloud.set_title('Distribution of Activated Instances by Cloud Provider', fontsize=16)
+                legend_labels = [f'{cloud}' for cloud in cloud_counts.index]
+                ax_cloud.legend(wedges, legend_labels,
+                           title="Cloud Providers",
+                           loc="center left",
+                           bbox_to_anchor=(1, 0, 0.5, 1))
+            else:
+                ax_cloud.text(0.5, 0.5, 'No cloud provider data found',
+                         ha='center', va='center')
+        else:
+            ax_cloud.text(0.5, 0.5, 'Cloud provider distribution not available',
+                     ha='center', va='center')
+        plt.tight_layout()
+        visualizations['cloud_provider_distribution'] = fig_cloud
 
         # 3. Growth of Activated Instances Over Time (Line Chart)
         if 'monthly' in metrics and 'data' in metrics['monthly']:

@@ -24,6 +24,7 @@
         .slider-label { font-weight: 500; margin-right: 8px; }
         .chart-row { display: flex; flex-wrap: wrap; gap: 24px; }
         .chart-half { flex: 1 1 350px; min-width: 350px; }
+        .chart-third { flex: 1 1 300px; min-width: 300px; }
     </style>
 </head>
 <body>
@@ -248,10 +249,11 @@ function renderCharts() {
     let mod = selectedModule;
     let chartsTarget = currentCategory === "overall" ? "overall-charts"
         : currentCategory === "common services" ? "common-charts" : "mission-charts";
-    // Two pie charts side by side for environment and service category split
+    // Three pie charts side by side for cloud provider, environment, and service category split
     let chartsHtml = `<div class="chart-row">
-        <div class="chart-half" id="${chartsTarget}-env-dist"></div>
-        <div class="chart-half" id="${chartsTarget}-svc-split"></div>
+        <div class="chart-third" id="${chartsTarget}-cloud-dist"></div>
+        <div class="chart-third" id="${chartsTarget}-env-dist"></div>
+        <div class="chart-third" id="${chartsTarget}-svc-split"></div>
     </div>
     <div id="${chartsTarget}-module-usage" class="chart-container"></div>
     <div id="${chartsTarget}-growth" class="chart-container"></div>`;
@@ -259,9 +261,65 @@ function renderCharts() {
 
     // Clear previous charts
     Plotly.purge(`${chartsTarget}-module-usage`);
+    Plotly.purge(`${chartsTarget}-cloud-dist`);
     Plotly.purge(`${chartsTarget}-env-dist`);
     Plotly.purge(`${chartsTarget}-svc-split`);
     Plotly.purge(`${chartsTarget}-growth`);
+
+    // Cloud Provider Distribution Pie Chart
+    let cloudDist = {};
+    if (selectedEnv === "All") {
+        if (currentCategory === "overall") {
+            cloudDist = catData.overall.cloud_provider_distribution || {};
+        } else {
+            // For service category tabs, aggregate from by_service_category_and_cloud_provider
+            if (m.by_service_category_and_cloud_provider) {
+                for (let key in m.by_service_category_and_cloud_provider) {
+                    let [cat, cp] = key.split("::");
+                    if (cat === currentCategory) {
+                        let val = m.by_service_category_and_cloud_provider[key].activated_instances || 0;
+                        if (val > 0) cloudDist[cp] = val;
+                    }
+                }
+            }
+        }
+    } else {
+        // When a specific environment is selected
+        if (currentCategory === "overall") {
+            // Aggregate from by_cloud_and_environment
+            if (m.by_cloud_and_environment) {
+                for (let key in m.by_cloud_and_environment) {
+                    let [cp, envName] = key.split("::");
+                    if (envName === selectedEnv) {
+                        let val = m.by_cloud_and_environment[key].activated_instances || 0;
+                        if (val > 0) cloudDist[cp] = val;
+                    }
+                }
+            }
+        } else {
+            // Service category tab with specific environment
+            if (m.by_service_category_and_cloud_and_env) {
+                for (let key in m.by_service_category_and_cloud_and_env) {
+                    let [cat, cp, envName] = key.split("::");
+                    if (cat === currentCategory && envName === selectedEnv) {
+                        let val = m.by_service_category_and_cloud_and_env[key].activated_instances || 0;
+                        if (val > 0) cloudDist[cp] = val;
+                    }
+                }
+            }
+        }
+    }
+    let cloudLabels = Object.keys(cloudDist);
+    let cloudVals = Object.values(cloudDist);
+    Plotly.newPlot(`${chartsTarget}-cloud-dist`, [{
+        labels: cloudLabels,
+        values: cloudVals,
+        type: 'pie',
+        textinfo: 'label+percent+value'
+    }], {
+        title: 'Cloud Provider Distribution',
+        height: 400
+    }, {responsive: true});
 
     // Environment Distribution Pie Chart
     let envDist = {};
