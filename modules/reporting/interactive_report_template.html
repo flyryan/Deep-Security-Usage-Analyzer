@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DSUA Interactive Report</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <style>
+        body { background: #f8f9fa; }
+        .container { margin-top: 40px; }
+        .section { background: #fff; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 32px;}
+        .metric-card { background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 10px 0; }
+        .metric-value { font-size: 24px; font-weight: bold; color: #2c3e50; }
+        .metric-label { color: #666; font-size: 14px; margin-top: 5px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
+        .table-responsive { margin-top: 20px; }
+        .chart-container { background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 32px; min-height: 420px; }
+        .timestamp { color: #666; font-style: italic; margin-bottom: 20px; }
+        .tab-content { margin-top: 24px; }
+        .tab-pane { padding-top: 16px; }
+        .filter-bar { margin-bottom: 24px; }
+        .slider-label { font-weight: 500; margin-right: 8px; }
+        .chart-row { display: flex; flex-wrap: wrap; gap: 24px; }
+        .chart-half { flex: 1 1 350px; min-width: 350px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1 class="mb-4">Deep Security Usage Analyzer Interactive Report</h1>
+    <p class="timestamp" id="timestamp"></p>
+    <div class="filter-bar d-flex align-items-center flex-wrap">
+        <div>
+            <label class="slider-label" for="cloud-select">Cloud Provider:</label>
+            <select id="cloud-select" class="form-select d-inline-block" style="width:auto;" onchange="updateDashboard()"></select>
+        </div>
+        <div class="ms-4">
+            <label class="slider-label" for="env-select">Environment:</label>
+            <select id="env-select" class="form-select d-inline-block" style="width:auto;" onchange="updateDashboard()"></select>
+        </div>
+        <div class="ms-4">
+            <label class="slider-label" for="module-select">Module:</label>
+            <select id="module-select" class="form-select d-inline-block" style="width:auto;" onchange="updateDashboard()"></select>
+        </div>
+    </div>
+    <ul class="nav nav-tabs" id="categoryTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="overall-tab" data-bs-toggle="tab" data-bs-target="#overall" type="button" role="tab">Overall</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="common-tab" data-bs-toggle="tab" data-bs-target="#common" type="button" role="tab">Common Services</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="mission-tab" data-bs-toggle="tab" data-bs-target="#mission" type="button" role="tab">Mission Partners</button>
+        </li>
+    </ul>
+    <div class="tab-content" id="categoryTabsContent">
+        <div class="tab-pane fade show active" id="overall" role="tabpanel">
+            <div class="section" id="overall-metrics"></div>
+            <div class="section" id="overall-charts"></div>
+            <div class="section" id="overall-table"></div>
+        </div>
+        <div class="tab-pane fade" id="common" role="tabpanel">
+            <div class="section" id="common-metrics"></div>
+            <div class="section" id="common-charts"></div>
+            <div class="section" id="common-table"></div>
+        </div>
+        <div class="tab-pane fade" id="mission" role="tabpanel">
+            <div class="section" id="mission-metrics"></div>
+            <div class="section" id="mission-charts"></div>
+            <div class="section" id="mission-table"></div>
+        </div>
+    </div>
+</div>
+<script>
+let metrics = null; // Will be replaced with embedded JSON
+let selectedCloudProvider = "All";
+let selectedEnv = "All";
+let selectedModule = "All";
+let currentCategory = "overall";
+
+function getCurrentMetrics() {
+    // Always use 24-hour threshold (default)
+    if (metrics && typeof metrics === "object" && metrics.hasOwnProperty("24")) {
+        return metrics["24"];
+    }
+    return metrics;
+}
+
+function updateDashboard() {
+    // Update selected values
+    selectedCloudProvider = document.getElementById('cloud-select').value;
+    selectedEnv = document.getElementById('env-select').value;
+    selectedModule = document.getElementById('module-select').value;
+    
+    let activeTab = document.querySelector('.nav-link.active').id;
+    if (activeTab === "overall-tab") currentCategory = "overall";
+    else if (activeTab === "common-tab") currentCategory = "common services";
+    else if (activeTab === "mission-tab") currentCategory = "mission partners";
+    
+    // Always repopulate filters to update environment and module lists based on current selections
+    populateFilters();
+    
+    renderMetrics();
+    renderCharts();
+    renderTable();
+}
+
+function populateFilters() {
+    let m = getCurrentMetrics();
+    let cloudSet = new Set();
+    let envSet = new Set();
+    let moduleSet = new Set();
+
+    // Populate cloud providers from by_cloud_provider
+    if (m.by_cloud_provider) {
+        for (let cp in m.by_cloud_provider) cloudSet.add(cp);
+    }
+    let cloudSelect = document.getElementById('cloud-select');
+    cloudSelect.innerHTML = '<option value="All">All</option>' + Array.from(cloudSet).map(c => `<option value="${c}">${c}</option>`).join('');
+    
+    // Restore cloud selection
+    cloudSelect.value = selectedCloudProvider;
+
+    // Populate environments based on selected cloud provider
+    if (selectedCloudProvider === "All" || !m.by_cloud_and_environment) {
+        for (let env in m.by_environment) envSet.add(env);
+    } else {
+        // Only environments present for the selected cloud provider
+        for (let key in m.by_cloud_and_environment) {
+            let [cp, env] = key.split("::");
+            if (cp === selectedCloudProvider) envSet.add(env);
+        }
+    }
+    let envSelect = document.getElementById('env-select');
+    envSelect.innerHTML = '<option value="All">All</option>' + Array.from(envSet).map(e => `<option value="${e}">${e}</option>`).join('');
+    
+    // Reset environment selection if current selection is not available
+    if (!envSet.has(selectedEnv) && selectedEnv !== "All") {
+        selectedEnv = "All";
+    }
+    envSelect.value = selectedEnv;
+
+    // Populate modules based on current filters
+    let moduleUsage = {};
+    
+    // Determine which module usage data to use based on current filters
+    if (currentCategory === "overall") {
+        if (selectedCloudProvider === "All" && selectedEnv === "All") {
+            moduleUsage = m.overall.module_usage;
+        } else if (selectedCloudProvider !== "All" && selectedEnv === "All") {
+            moduleUsage = m.by_cloud_provider[selectedCloudProvider]?.module_usage || {};
+        } else if (selectedCloudProvider === "All" && selectedEnv !== "All") {
+            moduleUsage = m.by_environment[selectedEnv]?.module_usage || {};
+        } else {
+            let key = `${selectedCloudProvider}::${selectedEnv}`;
+            moduleUsage = m.by_cloud_and_environment[key]?.module_usage || {};
+        }
+    } else {
+        // Service category tab
+        let catData = m.by_service_category[currentCategory];
+        if (selectedCloudProvider === "All" && selectedEnv === "All") {
+            moduleUsage = catData.overall.module_usage;
+        } else if (selectedCloudProvider !== "All" && selectedEnv === "All") {
+            let key = `${currentCategory}::${selectedCloudProvider}`;
+            moduleUsage = m.by_service_category_and_cloud_provider[key]?.module_usage || {};
+        } else if (selectedCloudProvider === "All" && selectedEnv !== "All") {
+            moduleUsage = catData.by_environment[selectedEnv]?.module_usage || {};
+        } else {
+            let key = `${currentCategory}::${selectedCloudProvider}::${selectedEnv}`;
+            moduleUsage = m.by_service_category_and_cloud_and_env[key]?.module_usage || {};
+        }
+    }
+    
+    // Only add modules that have usage > 0
+    for (let mod in moduleUsage) {
+        if (moduleUsage[mod] > 0) moduleSet.add(mod);
+    }
+    
+    let moduleSelect = document.getElementById('module-select');
+    moduleSelect.innerHTML = '<option value="All">All</option>' + Array.from(moduleSet).sort().map(m => `<option value="${m}">${m}</option>`).join('');
+    
+    // Reset module selection if current selection is not available
+    if (!moduleSet.has(selectedModule) && selectedModule !== "All") {
+        selectedModule = "All";
+    }
+    moduleSelect.value = selectedModule;
+}
+
+function renderMetrics() {
+    let m = getCurrentMetrics();
+    let cat = currentCategory === "overall" ? m.overall
+        : m.by_service_category[currentCategory].overall;
+    let env = selectedEnv;
+    let stats = null;
+    let target = currentCategory === "overall" ? "overall-metrics"
+        : currentCategory === "common services" ? "common-metrics" : "mission-metrics";
+
+    if (selectedCloudProvider === "All") {
+        // Use existing logic
+        let envStats = (env !== "All" && m.by_environment[env]) ? m.by_environment[env] : null;
+        stats = envStats || cat;
+    } else {
+        // Use correct splits for service category + provider
+        if (currentCategory === "overall") {
+            // Overall tab: use by_cloud_provider/by_cloud_and_environment
+            if (env === "All") {
+                stats = m.by_cloud_provider && m.by_cloud_provider[selectedCloudProvider]
+                    ? m.by_cloud_provider[selectedCloudProvider]
+                    : { total_instances: 0, activated_instances: 0, inactive_instances: 0, total_hours: 0 };
+            } else {
+                let key = `${selectedCloudProvider}::${env}`;
+                stats = m.by_cloud_and_environment && m.by_cloud_and_environment[key]
+                    ? m.by_cloud_and_environment[key]
+                    : { total_instances: 0, activated_instances: 0, inactive_instances: 0, total_hours: 0 };
+            }
+        } else {
+            // Service category tab: use by_service_category_and_cloud_provider/by_service_category_and_cloud_and_env
+            if (env === "All") {
+                let key = `${currentCategory}::${selectedCloudProvider}`;
+                stats = m.by_service_category_and_cloud_provider && m.by_service_category_and_cloud_provider[key]
+                    ? m.by_service_category_and_cloud_provider[key]
+                    : { total_instances: 0, activated_instances: 0, inactive_instances: 0, total_hours: 0 };
+            } else {
+                let key = `${currentCategory}::${selectedCloudProvider}::${env}`;
+                stats = m.by_service_category_and_cloud_and_env && m.by_service_category_and_cloud_and_env[key]
+                    ? m.by_service_category_and_cloud_and_env[key]
+                    : { total_instances: 0, activated_instances: 0, inactive_instances: 0, total_hours: 0 };
+            }
+        }
+    }
+
+    document.getElementById(target).innerHTML = `
+        <div class="grid">
+            <div class="metric-card"><div class="metric-value">${stats.total_instances}</div><div class="metric-label">Total Unique Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${stats.activated_instances}</div><div class="metric-label">Activated Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${stats.inactive_instances}</div><div class="metric-label">Inactive Instances</div></div>
+            <div class="metric-card"><div class="metric-value">${stats.total_hours !== undefined ? stats.total_hours.toFixed(1) : "N/A"}</div><div class="metric-label">Total Hours</div></div>
+        </div>
+    `;
+}
+
+function renderCharts() {
+    let m = getCurrentMetrics();
+    let catData = currentCategory === "overall" ? m : m.by_service_category[currentCategory];
+    let env = selectedEnv;
+    let mod = selectedModule;
+    let chartsTarget = currentCategory === "overall" ? "overall-charts"
+        : currentCategory === "common services" ? "common-charts" : "mission-charts";
+    // Two pie charts side by side for environment and service category split
+    let chartsHtml = `<div class="chart-row">
+        <div class="chart-half" id="${chartsTarget}-env-dist"></div>
+        <div class="chart-half" id="${chartsTarget}-svc-split"></div>
+    </div>
+    <div id="${chartsTarget}-module-usage" class="chart-container"></div>
+    <div id="${chartsTarget}-growth" class="chart-container"></div>`;
+    document.getElementById(chartsTarget).innerHTML = chartsHtml;
+
+    // Clear previous charts
+    Plotly.purge(`${chartsTarget}-module-usage`);
+    Plotly.purge(`${chartsTarget}-env-dist`);
+    Plotly.purge(`${chartsTarget}-svc-split`);
+    Plotly.purge(`${chartsTarget}-growth`);
+
+    // Environment Distribution Pie Chart
+    let envDist = {};
+    if (selectedCloudProvider === "All") {
+        envDist = catData.overall.environment_distribution || {};
+    } else {
+        // If on "overall" tab, use by_cloud_and_environment; otherwise, use by_service_category_and_cloud_and_env
+        if (currentCategory === "overall") {
+            if (m.by_cloud_and_environment) {
+                for (let key in m.by_cloud_and_environment) {
+                    let [cp, envName] = key.split("::");
+                    if (cp === selectedCloudProvider) {
+                        let val = m.by_cloud_and_environment[key].activated_instances || 0;
+                        if (val > 0) envDist[envName] = val;
+                    }
+                }
+            }
+        } else {
+            // Service category tab: use by_service_category_and_cloud_and_env
+            if (m.by_service_category_and_cloud_and_env) {
+                for (let key in m.by_service_category_and_cloud_and_env) {
+                    let [cat, cp, envName] = key.split("::");
+                    if (cat === currentCategory && cp === selectedCloudProvider) {
+                        let val = m.by_service_category_and_cloud_and_env[key].activated_instances || 0;
+                        if (val > 0) envDist[envName] = val;
+                    }
+                }
+            }
+        }
+    }
+    let envLabels = Object.keys(envDist);
+    let envVals = Object.values(envDist);
+    Plotly.newPlot(`${chartsTarget}-env-dist`, [{
+        labels: envLabels,
+        values: envVals,
+        type: 'pie',
+        textinfo: 'label+percent+value'
+    }], {
+        title: 'Environment Distribution',
+        height: 400
+    }, {responsive: true});
+
+    // Service Category Split Pie Chart (responsive to environment and cloud provider)
+    if (m.by_service_category) {
+        let svcLabels = ["Common Services", "Mission Partners"];
+        let svcVals;
+        if (selectedCloudProvider === "All") {
+            if (env === "All") {
+                svcVals = [
+                    m.by_service_category["common services"].overall.activated_instances,
+                    m.by_service_category["mission partners"].overall.activated_instances
+                ];
+            } else {
+                svcVals = [
+                    m.by_service_category["common services"].by_environment[env]
+                        ? m.by_service_category["common services"].by_environment[env].activated_instances : 0,
+                    m.by_service_category["mission partners"].by_environment[env]
+                        ? m.by_service_category["mission partners"].by_environment[env].activated_instances : 0
+                ];
+            }
+        } else {
+            // Use new backend splits
+            if (env === "All") {
+                svcVals = [
+                    m.by_service_category_and_cloud_provider[`common services::${selectedCloudProvider}`]
+                        ? m.by_service_category_and_cloud_provider[`common services::${selectedCloudProvider}`].activated_instances : 0,
+                    m.by_service_category_and_cloud_provider[`mission partners::${selectedCloudProvider}`]
+                        ? m.by_service_category_and_cloud_provider[`mission partners::${selectedCloudProvider}`].activated_instances : 0
+                ];
+            } else {
+                svcVals = [
+                    m.by_service_category_and_cloud_and_env[`common services::${selectedCloudProvider}::${env}`]
+                        ? m.by_service_category_and_cloud_and_env[`common services::${selectedCloudProvider}::${env}`].activated_instances : 0,
+                    m.by_service_category_and_cloud_and_env[`mission partners::${selectedCloudProvider}::${env}`]
+                        ? m.by_service_category_and_cloud_and_env[`mission partners::${selectedCloudProvider}::${env}`].activated_instances : 0
+                ];
+            }
+        }
+        Plotly.newPlot(`${chartsTarget}-svc-split`, [{
+            labels: svcLabels,
+            values: svcVals,
+            type: 'pie',
+            textinfo: 'label+percent+value'
+        }], {
+            title: 'Service Category Split (Activated Instances)',
+            height: 400
+        }, {responsive: true});
+    }
+
+    // Module Usage Bar Chart
+    let moduleUsage = {};
+    if (selectedCloudProvider === "All") {
+        moduleUsage = (env === "All")
+            ? catData.overall.module_usage
+            : catData.by_environment && catData.by_environment[env]
+                ? catData.by_environment[env].module_usage : {};
+    } else {
+        if (env === "All") {
+            moduleUsage = m.by_cloud_provider && m.by_cloud_provider[selectedCloudProvider]
+                ? m.by_cloud_provider[selectedCloudProvider].module_usage : {};
+        } else {
+            let key = `${selectedCloudProvider}::${env}`;
+            moduleUsage = m.by_cloud_and_environment && m.by_cloud_and_environment[key]
+                ? m.by_cloud_and_environment[key].module_usage : {};
+        }
+    }
+    if (mod !== "All") {
+        moduleUsage = { [mod]: moduleUsage[mod] || 0 };
+    }
+    let modules = Object.keys(moduleUsage);
+    let usageCounts = Object.values(moduleUsage);
+    Plotly.newPlot(`${chartsTarget}-module-usage`, [{
+        x: modules,
+        y: usageCounts,
+        type: 'bar',
+        marker: { color: '#0d6efd' }
+    }], {
+        title: `Module Usage${env !== "All" ? " in " + env : ""}${mod !== "All" ? " (" + mod + ")" : ""}`,
+        yaxis: { title: 'Usage Count' },
+        height: 400
+    }, {responsive: true});
+
+    // Growth Line Chart - Use the appropriate monthly data based on filters
+    let monthlyData = null;
+    let chartTitle = 'Activated Instances Growth';
+    
+    // Determine which monthly data to use based on current filters
+    if (selectedCloudProvider === "All" && env === "All") {
+        // Use category-level monthly data
+        monthlyData = catData.monthly;
+    } else if (currentCategory === "overall") {
+        // Overall tab
+        if (selectedCloudProvider !== "All" && env === "All") {
+            // Cloud provider only
+            monthlyData = m.by_cloud_provider[selectedCloudProvider]?.monthly;
+            chartTitle += ` - ${selectedCloudProvider}`;
+        } else if (selectedCloudProvider !== "All" && env !== "All") {
+            // Cloud provider + environment
+            let key = `${selectedCloudProvider}::${env}`;
+            monthlyData = m.by_cloud_and_environment[key]?.monthly;
+            chartTitle += ` - ${selectedCloudProvider} ${env}`;
+        } else if (selectedCloudProvider === "All" && env !== "All") {
+            // Environment only
+            monthlyData = m.by_environment[env]?.monthly;
+            chartTitle += ` - ${env}`;
+        }
+    } else {
+        // Service category tab
+        if (selectedCloudProvider !== "All" && env === "All") {
+            // Service category + cloud provider
+            let key = `${currentCategory}::${selectedCloudProvider}`;
+            monthlyData = m.by_service_category_and_cloud_provider[key]?.monthly;
+            chartTitle += ` - ${selectedCloudProvider}`;
+        } else if (selectedCloudProvider !== "All" && env !== "All") {
+            // Service category + cloud provider + environment
+            let key = `${currentCategory}::${selectedCloudProvider}::${env}`;
+            monthlyData = m.by_service_category_and_cloud_and_env[key]?.monthly;
+            chartTitle += ` - ${selectedCloudProvider} ${env}`;
+        } else if (selectedCloudProvider === "All" && env !== "All") {
+            // Service category + environment
+            monthlyData = catData.by_environment[env]?.monthly;
+            chartTitle += ` - ${env}`;
+        }
+    }
+    
+    // Extract data for plotting
+    let monthly = monthlyData && monthlyData.data ? monthlyData.data : [];
+    let months = monthly.map(m => m.month);
+    let activated = monthly.map(m => m.activated_instances);
+    
+    // Get average monthly growth
+    let avgGrowth = monthlyData && monthlyData.average_monthly_growth !== undefined 
+        ? monthlyData.average_monthly_growth.toFixed(1) 
+        : "N/A";
+    
+    // Add average growth to the title as a subtitle
+    let fullTitle = {
+        text: chartTitle,
+        font: { size: 16 }
+    };
+    
+    // Create layout with annotation for average growth
+    let layout = {
+        title: fullTitle,
+        yaxis: { title: 'Activated Instances' },
+        height: 400,
+        annotations: [{
+            xref: 'paper',
+            yref: 'paper',
+            x: 0.5,
+            y: 1.05,
+            xanchor: 'center',
+            yanchor: 'bottom',
+            text: `Average Monthly Growth: ${avgGrowth} instances`,
+            showarrow: false,
+            font: {
+                size: 14,
+                color: '#666'
+            }
+        }]
+    };
+    
+    Plotly.newPlot(`${chartsTarget}-growth`, [{
+        x: months,
+        y: activated,
+        type: 'scatter',
+        mode: 'lines+markers',
+        marker: { color: '#198754' }
+    }], layout, {responsive: true});
+}
+
+function renderTable() {
+    let m = getCurrentMetrics();
+    let catData = currentCategory === "overall" ? m : m.by_service_category[currentCategory];
+    let env = selectedEnv;
+    let tableTarget = currentCategory === "overall" ? "overall-table"
+        : currentCategory === "common services" ? "common-table" : "mission-table";
+    let rows = [];
+    if (selectedCloudProvider === "All") {
+        if (env === "All") {
+            for (let e in catData.by_environment) {
+                let d = catData.by_environment[e];
+                rows.push(`<tr>
+                    <td>${e}</td>
+                    <td>${d.total_instances}</td>
+                    <td>${d.activated_instances}</td>
+                    <td>${d.most_common_module}</td>
+                    <td>${d.max_concurrent ?? 'None'}</td>
+                    <td>${d.total_utilization_hours !== undefined ? d.total_utilization_hours.toFixed(1) : 'N/A'}</td>
+                </tr>`);
+            }
+        } else if (catData.by_environment && catData.by_environment[env]) {
+            let d = catData.by_environment[env];
+            rows.push(`<tr>
+                <td>${env}</td>
+                <td>${d.total_instances}</td>
+                <td>${d.activated_instances}</td>
+                <td>${d.most_common_module}</td>
+                <td>${d.max_concurrent ?? 'None'}</td>
+                <td>${d.total_utilization_hours !== undefined ? d.total_utilization_hours.toFixed(1) : 'N/A'}</td>
+            </tr>`);
+        }
+    } else {
+        if (env === "All") {
+            // Show all environments for selected cloud provider
+            if (m.by_cloud_and_environment) {
+                for (let key in m.by_cloud_and_environment) {
+                    let [cp, e] = key.split("::");
+                    if (cp === selectedCloudProvider) {
+                        let d = m.by_cloud_and_environment[key];
+                        rows.push(`<tr>
+                            <td>${e}</td>
+                            <td>${d.total_instances}</td>
+                            <td>${d.activated_instances}</td>
+                            <td>${d.most_common_module || "N/A"}</td>
+                            <td>${d.max_concurrent ?? 'None'}</td>
+                            <td>${d.total_hours !== undefined ? d.total_hours.toFixed(1) : 'N/A'}</td>
+                        </tr>`);
+                    }
+                }
+            }
+        } else {
+            let key = `${selectedCloudProvider}::${env}`;
+            let d = m.by_cloud_and_environment && m.by_cloud_and_environment[key]
+                ? m.by_cloud_and_environment[key]
+                : null;
+            if (d) {
+                rows.push(`<tr>
+                    <td>${env}</td>
+                    <td>${d.total_instances}</td>
+                    <td>${d.activated_instances}</td>
+                    <td>${d.most_common_module || "N/A"}</td>
+                    <td>${d.max_concurrent ?? 'None'}</td>
+                    <td>${d.total_hours !== undefined ? d.total_hours.toFixed(1) : 'N/A'}</td>
+                </tr>`);
+            }
+        }
+    }
+    document.getElementById(tableTarget).innerHTML = `
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Environment</th>
+                        <th>Total Hosts</th>
+                        <th>Activated Hosts</th>
+                        <th>Most Used Module</th>
+                        <th>Max Concurrent</th>
+                        <th>Total Hours</th>
+                    </tr>
+                </thead>
+                <tbody>${rows.join('')}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+window.onload = function() {
+    document.getElementById('timestamp').textContent = "Generated on: " + new Date().toLocaleString();
+    populateFilters();
+    updateDashboard();
+    document.querySelectorAll('.nav-link').forEach(tab => {
+        tab.addEventListener('shown.bs.tab', function (e) {
+            updateDashboard();
+        });
+    });
+};
+</script>
+</body>
+</html>
