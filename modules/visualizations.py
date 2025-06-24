@@ -36,7 +36,7 @@ def create_visualizations(metrics: Dict, output_dir: Path) -> Dict[str, plt.Figu
         fig1, ax1 = plt.subplots(figsize=(12, 8))
         module_cols = ['AM', 'WRS', 'DC', 'AC', 'IM', 'LI', 'FW', 'DPI', 'SAP']
         env_data = {}
-        for env in ['Production', 'Development', 'Test', 'Staging', 'Integration', 'DR', 'UAT']:
+        for env in ['Production', 'Development', 'Test', 'Staging', 'Integration', 'DR', 'UAT', 'IL4', 'IL5', 'C1D']:
             if env in metrics['by_environment']:
                 env_data[env] = metrics['by_environment'][env]['module_usage']
         module_usage_df = pd.DataFrame(env_data).fillna(0)
@@ -126,7 +126,7 @@ def create_visualizations(metrics: Dict, output_dir: Path) -> Dict[str, plt.Figu
             # 1. Module Usage by Environment
             fig_cat, ax_cat = plt.subplots(figsize=(12, 8))
             env_data_cat = {}
-            for env in ['Production', 'Development', 'Test', 'Staging', 'Integration', 'DR', 'UAT']:
+            for env in ['Production', 'Development', 'Test', 'Staging', 'Integration', 'DR', 'UAT', 'IL4', 'IL5', 'C1D']:
                 if env in cat_metrics['by_environment']:
                     env_data_cat[env] = cat_metrics['by_environment'][env]['module_usage']
             module_usage_df_cat = pd.DataFrame(env_data_cat).fillna(0)
