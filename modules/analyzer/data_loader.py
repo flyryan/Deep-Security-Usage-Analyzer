@@ -53,7 +53,8 @@ def preprocess_df(df: pd.DataFrame, file_name: str = "") -> pd.DataFrame:
             df[col] = 0
             logger.debug(f"Added missing module column {col} to {file_name}")
         else:
-            df[col] = df[col].fillna(0).astype(int)
+            # Convert to numeric, replacing non-numeric values with 0
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
         # Check for invalid values
         invalid_values = df[col][(df[col] != 0) & (df[col] != 1)].unique()
         if len(invalid_values) > 0:
@@ -146,7 +147,22 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
             print(f"\rProcessing file {i}/{len(files)}: {file.name}" + " " * 50, end='')
             
             if file.suffix == '.csv':
-                df = pd.read_csv(file, low_memory=False)
+                # First, try to detect delimiter by reading first line
+                with open(file, 'r', encoding='utf-8-sig') as f:
+                    first_line = f.readline()
+                    if '\t' in first_line and ',' not in first_line:
+                        # Tab-delimited file
+                        df = pd.read_csv(file, sep='\t', low_memory=False, encoding='utf-8-sig')
+                    else:
+                        # Comma-delimited file
+                        df = pd.read_csv(file, low_memory=False, encoding='utf-8-sig')
+                
+                # Check for duplicate header rows within the data
+                header_cols = df.columns.tolist()
+                duplicate_header_mask = df.apply(lambda row: all(str(row[col]) == col for col in header_cols if col in row.index), axis=1)
+                if duplicate_header_mask.any():
+                    logger.warning(f"Found {duplicate_header_mask.sum()} duplicate header rows in {file.name}, removing them")
+                    df = df[~duplicate_header_mask]
             else:
                 df = pd.read_excel(file)
             
@@ -170,6 +186,9 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
             df['Source_Cloud_Provider'] = cloud_provider
 
             # Handle date columns
+            date_columns_found = False
+            
+            # Check for various date column formats
             if 'Start Date' in df.columns and 'Start Time' in df.columns:
                 try:
                     df['start_datetime'] = pd.to_datetime(
@@ -184,19 +203,34 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
                         format='mixed',
                         errors='coerce'
                     )
+                    date_columns_found = True
                 except Exception as e:
                     logger.error(f"Error converting date/time columns in {file.name}: {str(e)}")
-                    continue
             elif 'Start' in df.columns:
                 try:
                     df['start_datetime'] = pd.to_datetime(df['Start'], errors='coerce')
                     if 'Stop' in df.columns:
                         df['stop_datetime'] = pd.to_datetime(df['Stop'], errors='coerce')
+                    date_columns_found = True
                 except Exception as e:
                     logger.error(f"Error converting Start/Stop columns in {file.name}: {str(e)}")
-                    continue
             else:
+                # Try to find date columns with different naming conventions
+                start_candidates = [col for col in df.columns if 'start' in col.lower() and 'date' in col.lower()]
+                stop_candidates = [col for col in df.columns if 'stop' in col.lower() and 'date' in col.lower()]
+                
+                if start_candidates and stop_candidates:
+                    try:
+                        df['start_datetime'] = pd.to_datetime(df[start_candidates[0]], errors='coerce')
+                        df['stop_datetime'] = pd.to_datetime(df[stop_candidates[0]], errors='coerce')
+                        date_columns_found = True
+                        logger.info(f"Using alternative date columns: {start_candidates[0]}, {stop_candidates[0]}")
+                    except Exception as e:
+                        logger.error(f"Error converting alternative date columns in {file.name}: {str(e)}")
+            
+            if not date_columns_found:
                 logger.error(f"No valid datetime columns found in {file.name}")
+                logger.debug(f"Available columns: {df.columns.tolist()}")
                 continue
             
             # Remove rows with invalid dates
