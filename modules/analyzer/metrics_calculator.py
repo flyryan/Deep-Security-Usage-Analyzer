@@ -281,7 +281,11 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
     # Calculate environment metrics
     environments = sorted(data['Environment'].unique())
     for env in environments:
-        metrics['by_environment'][env] = calculate_environment_metrics(data, env)
+        env_data = data[data['Environment'] == env]
+        env_metrics = calculate_environment_metrics(data, env)
+        # Add monthly metrics for this environment
+        env_metrics['monthly'] = calculate_monthly_metrics(env_data)
+        metrics['by_environment'][env] = env_metrics
 
     print(f"[DEBUG] Calculated environment metrics")
 
@@ -289,7 +293,10 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
     cloud_providers = sorted(data['Cloud_Provider'].unique())
     for cp in cloud_providers:
         cp_data = data[data['Cloud_Provider'] == cp]
-        metrics['by_cloud_provider'][cp] = calculate_overall_metrics(cp_data)
+        cp_metrics = calculate_overall_metrics(cp_data)
+        # Add monthly metrics for this cloud provider
+        cp_metrics['monthly'] = calculate_monthly_metrics(cp_data)
+        metrics['by_cloud_provider'][cp] = cp_metrics
 
     print(f"[DEBUG] Calculated cloud provider metrics")
 
@@ -300,7 +307,10 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
         for env in cp_envs:
             key = f"{cp}::{env}"
             env_data = cp_data[cp_data['Environment'] == env]
-            metrics['by_cloud_and_environment'][key] = calculate_overall_metrics(env_data)
+            ce_metrics = calculate_overall_metrics(env_data)
+            # Add monthly metrics for this cloud+environment combination
+            ce_metrics['monthly'] = calculate_monthly_metrics(env_data)
+            metrics['by_cloud_and_environment'][key] = ce_metrics
 
     print(f"[DEBUG] Calculated cloud+environment metrics")
 
@@ -386,12 +396,19 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
         for cp in cloud_providers:
             cat_cp_data = cat_data[cat_data['Cloud_Provider'] == cp]
             key_cp = f"{category}::{cp}"
-            metrics['by_service_category_and_cloud_provider'][key_cp] = calculate_overall_metrics(cat_cp_data)
+            scp_metrics = calculate_overall_metrics(cat_cp_data)
+            # Add monthly metrics for service category + cloud provider
+            scp_metrics['monthly'] = calculate_monthly_metrics(cat_cp_data)
+            metrics['by_service_category_and_cloud_provider'][key_cp] = scp_metrics
+            
             cp_envs = sorted(cat_cp_data['Environment'].unique())
             for env in cp_envs:
                 key_cpe = f"{category}::{cp}::{env}"
                 cat_cp_env_data = cat_cp_data[cat_cp_data['Environment'] == env]
-                metrics['by_service_category_and_cloud_and_env'][key_cpe] = calculate_overall_metrics(cat_cp_env_data)
+                scpe_metrics = calculate_overall_metrics(cat_cp_env_data)
+                # Add monthly metrics for service category + cloud provider + environment
+                scpe_metrics['monthly'] = calculate_monthly_metrics(cat_cp_env_data)
+                metrics['by_service_category_and_cloud_and_env'][key_cpe] = scpe_metrics
 
     print(f"[DEBUG] Calculated service_category metrics")
 
