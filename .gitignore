@@ -53,7 +53,9 @@ Desktop.ini
 *.log
 *.tmp
 *.bak
+# Ignore HTML files except templates
 *.html
+!modules/reporting/interactive_report_template.html
 *.txt
 
 # Temporary Files
