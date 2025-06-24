@@ -276,6 +276,10 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
                     logger.debug(f"Converting invalid values in {col} column of {file.name}")
                     df[col] = df[col].map(lambda x: 1 if x == 1 else 0)
             
+            # Ensure Duration (Seconds) is numeric
+            if 'Duration (Seconds)' in df.columns:
+                df['Duration (Seconds)'] = pd.to_numeric(df['Duration (Seconds)'], errors='coerce').fillna(0)
+            
             if len(df) > 0:
                 dfs.append(df)
             else:
@@ -407,10 +411,12 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
         
         # Recalculate duration for swapped records
         if 'Duration (Seconds)' in combined_df.columns:
-            combined_df.loc[invalid_duration, 'Duration (Seconds)'] = (
+            # Calculate new durations and ensure they're numeric
+            new_durations = (
                 combined_df.loc[invalid_duration, 'stop_datetime'] - 
                 combined_df.loc[invalid_duration, 'start_datetime']
             ).dt.total_seconds()
+            combined_df.loc[invalid_duration, 'Duration (Seconds)'] = new_durations.astype(float)
         
         # Log some examples after fixing
         examples_after = combined_df.loc[examples.index].head(3)
