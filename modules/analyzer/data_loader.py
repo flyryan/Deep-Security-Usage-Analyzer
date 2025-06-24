@@ -291,6 +291,27 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
     if not dfs:
         raise ValueError("No valid data loaded from any files")
     
+    # Ensure all dataframes have consistent columns to avoid FutureWarning
+    if len(dfs) > 1:
+        # Get union of all columns
+        all_columns = set()
+        for df in dfs:
+            all_columns.update(df.columns)
+        
+        # Ensure all dataframes have all columns
+        aligned_dfs = []
+        for df in dfs:
+            missing_cols = all_columns - set(df.columns)
+            if missing_cols:
+                # Create a copy with missing columns added
+                df_copy = df.copy()
+                for col in missing_cols:
+                    df_copy[col] = None
+                aligned_dfs.append(df_copy)
+            else:
+                aligned_dfs.append(df)
+        dfs = aligned_dfs
+    
     # Combine all dataframes
     combined_df = pd.concat(dfs, ignore_index=True)
     
@@ -343,11 +364,58 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
             logger.debug(f"Final cleanup: Converting {invalid} invalid values in {col}")
             combined_df[col] = combined_df[col].map(lambda x: 1 if x == 1 else 0)
     
-    # Ensure stop_datetime is after start_datetime
+    # Fix records where stop_datetime is before start_datetime by swapping them
     invalid_duration = combined_df['stop_datetime'] < combined_df['start_datetime']
     if invalid_duration.any():
-        logger.warning(f"Removing {invalid_duration.sum()} rows where stop_datetime is before start_datetime")
-        combined_df = combined_df[~invalid_duration]
+        # Log details about the problematic records
+        logger.warning(f"Found {invalid_duration.sum()} rows where stop_datetime is before start_datetime")
+        
+        # Group by source file to identify problematic files
+        if 'File_Name' in combined_df.columns:
+            problematic_files = combined_df[invalid_duration]['File_Name'].value_counts()
+            logger.warning("Problematic records by file:")
+            for file, count in problematic_files.head(10).items():
+                logger.warning(f"  {file}: {count} records")
+        
+        # Log some examples before fixing
+        examples = combined_df[invalid_duration].head(3)
+        for idx, row in examples.iterrows():
+            logger.debug(f"Example before fix: {row.get('Hostname', 'N/A')} - Start: {row['start_datetime']}, Stop: {row['stop_datetime']}")
+        
+        # Swap the dates for invalid records
+        logger.warning(f"Swapping start/stop dates for {invalid_duration.sum()} records with reversed dates")
+        
+        # Store the original values
+        temp_start = combined_df.loc[invalid_duration, 'start_datetime'].copy()
+        temp_stop = combined_df.loc[invalid_duration, 'stop_datetime'].copy()
+        
+        # Swap them
+        combined_df.loc[invalid_duration, 'start_datetime'] = temp_stop
+        combined_df.loc[invalid_duration, 'stop_datetime'] = temp_start
+        
+        # Also swap the original date/time columns if they exist
+        if 'Start Date' in combined_df.columns and 'Stop Date' in combined_df.columns:
+            temp_start_date = combined_df.loc[invalid_duration, 'Start Date'].copy()
+            temp_stop_date = combined_df.loc[invalid_duration, 'Stop Date'].copy()
+            temp_start_time = combined_df.loc[invalid_duration, 'Start Time'].copy()
+            temp_stop_time = combined_df.loc[invalid_duration, 'Stop Time'].copy()
+            
+            combined_df.loc[invalid_duration, 'Start Date'] = temp_stop_date
+            combined_df.loc[invalid_duration, 'Stop Date'] = temp_start_date
+            combined_df.loc[invalid_duration, 'Start Time'] = temp_stop_time
+            combined_df.loc[invalid_duration, 'Stop Time'] = temp_start_time
+        
+        # Recalculate duration for swapped records
+        if 'Duration (Seconds)' in combined_df.columns:
+            combined_df.loc[invalid_duration, 'Duration (Seconds)'] = (
+                combined_df.loc[invalid_duration, 'stop_datetime'] - 
+                combined_df.loc[invalid_duration, 'start_datetime']
+            ).dt.total_seconds()
+        
+        # Log some examples after fixing
+        examples_after = combined_df.loc[examples.index].head(3)
+        for idx, row in examples_after.iterrows():
+            logger.debug(f"Example after fix: {row.get('Hostname', 'N/A')} - Start: {row['start_datetime']}, Stop: {row['stop_datetime']}, Duration: {row.get('Duration (Seconds)', 'N/A')}s")
     
     print(f"✓ Final dataset: {len(combined_df):,} records from {len(combined_df['Hostname'].unique()):,} unique hosts")
     
