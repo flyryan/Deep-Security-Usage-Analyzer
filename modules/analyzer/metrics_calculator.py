@@ -226,7 +226,7 @@ def calculate_monthly_metrics(data: pd.DataFrame, start_date: pd.Timestamp = Non
                 # Append metrics for the month
                 monthly_data.append({
                     'month': month_start.strftime('%Y-%m'),
-                    'activated_instances': current_month_count,
+                    'activated_instances': len(cumulative_instances),  # cumulative total up to this month
                     'new_instances': len(new_instances),
                     'lost_instances': len(lost_instances),
                     'max_concurrent': max_concurrent,
