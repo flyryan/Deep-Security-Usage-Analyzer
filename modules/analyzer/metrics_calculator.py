@@ -250,12 +250,40 @@ def calculate_monthly_metrics(data: pd.DataFrame, start_date: pd.Timestamp = Non
 
     print(f"[DEBUG] Entering calculate_all_metrics with ACTIVATION_MIN_HOURS={ACTIVATION_MIN_HOURS}")
 
+def assign_final_service_categories(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Assign final service category to each instance based on most recent record.
+    This prevents double-counting instances that appear in multiple categories.
+    """
+    # Create a copy to avoid modifying the original
+    data_copy = data.copy()
+    
+    # Find the most recent record for each hostname
+    most_recent_idx = data_copy.groupby('Hostname')['stop_datetime'].idxmax()
+    most_recent_records = data_copy.loc[most_recent_idx, ['Hostname', 'service_category']]
+    
+    # Create a mapping of hostname to its final service category
+    hostname_to_category = dict(zip(most_recent_records['Hostname'], most_recent_records['service_category']))
+    
+    # Apply the final category to all records for each hostname
+    data_copy['final_service_category'] = data_copy['Hostname'].map(hostname_to_category)
+    
+    # Log the impact
+    changed_count = (data_copy['service_category'] != data_copy['final_service_category']).sum()
+    if changed_count > 0:
+        logger.info(f"Updated service category for {changed_count} records based on most recent classification")
+    
+    return data_copy
+
 def calculate_all_metrics(data: pd.DataFrame) -> Dict:
     """Calculate all metrics from the loaded data, split by service_category and cloud_provider."""
     if data is None or data.empty:
         raise ValueError("No data loaded for analysis or DataFrame is empty.")
 
     logger.info("Calculating comprehensive metrics...")
+
+    # Assign final service categories based on most recent record
+    data = assign_final_service_categories(data)
 
     # 'has_modules', 'service_category', and 'Cloud_Provider' are now always present from preprocessing
 
@@ -362,7 +390,7 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
     # --- Split by service_category ---
     service_categories = ["common services", "mission partners"]
     for category in service_categories:
-        cat_data = data[data['service_category'] == category]
+        cat_data = data[data['final_service_category'] == category]
         cat_metrics = {
             'overall': calculate_overall_metrics(cat_data),
             'by_environment': {},
@@ -394,7 +422,7 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
 
         # --- Service category splits by cloud provider and by cloud+env ---
         for cp in cloud_providers:
-            cat_cp_data = cat_data[cat_data['Cloud_Provider'] == cp]
+            cat_cp_data = data[(data['final_service_category'] == category) & (data['Cloud_Provider'] == cp)]
             key_cp = f"{category}::{cp}"
             scp_metrics = calculate_overall_metrics(cat_cp_data)
             # Add monthly metrics for service category + cloud provider
