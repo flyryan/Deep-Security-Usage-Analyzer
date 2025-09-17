@@ -3,7 +3,8 @@ Metrics calculation functionality for the Deep Security Usage Analyzer.
 """
 import pandas as pd
 import logging
-from typing import Dict, Set
+from collections import defaultdict
+from typing import Dict
 import json
 import os
 
@@ -176,20 +177,54 @@ def calculate_monthly_metrics(data: pd.DataFrame, start_date: pd.Timestamp = Non
         )
 
         monthly_data = []
-        cumulative_instances = set()
-        previous_month_count = 0
+        cumulative_instances_all_time = set()
+        cumulative_instances_by_year = defaultdict(set)
+        previous_month_count_by_year = defaultdict(int)
+        previous_active_instances_by_year = defaultdict(set)
         total_growth = 0
         growth_months = 0
+        gap_ranges = []
+        current_gap_start = None
+        current_gap_end = None
 
         for month_start in all_months:
             month_end = month_start + pd.offsets.MonthEnd(1)
-
+            month_year = month_start.year
+            
             # Get all records for this month
             month_mask = (
                 (data['start_datetime'] <= month_end) &
                 (data['stop_datetime'] >= month_start)
             )
             month_data = data[month_mask].copy()
+
+            month_str = month_start.strftime('%Y-%m')
+
+            if month_data.empty:
+                # Track consecutive gaps so we can surface missing data later
+                if current_gap_start is None:
+                    current_gap_start = month_str
+                current_gap_end = month_str
+
+                # Carry forward the last known counts but flag the month
+                monthly_data.append({
+                    'month': month_str,
+                    'activated_instances': len(cumulative_instances_by_year[month_year]),
+                    'activated_instances_all_time': len(cumulative_instances_all_time),
+                    'new_instances': 0,
+                    'lost_instances': 0,
+                    'max_concurrent': 0,
+                    'avg_modules_per_host': 0,
+                    'total_hours': 0,
+                    'is_gap': True,
+                })
+                continue
+
+            # Close any open gap sequence when real data resumes
+            if current_gap_start is not None:
+                gap_ranges.append({'start': current_gap_start, 'end': current_gap_end})
+                current_gap_start = None
+                current_gap_end = None
 
             if not month_data.empty:
                 # Get activated instances for this month (using activation threshold)
@@ -208,30 +243,36 @@ def calculate_monthly_metrics(data: pd.DataFrame, start_date: pd.Timestamp = Non
                 # Max concurrent instances in the month
                 max_concurrent = calculate_concurrent_usage(activated_month_data)
 
-                # Calculate new and lost instances
-                new_instances = activated_instances_current - cumulative_instances
-                lost_instances = cumulative_instances - activated_instances_current
+                # Calculate new and lost instances compared to last month in this calendar year
+                prev_active = previous_active_instances_by_year[month_year]
+                new_instances = activated_instances_current - prev_active
+                lost_instances = prev_active - activated_instances_current
+                previous_active_instances_by_year[month_year] = activated_instances_current
 
-                # Update cumulative instances
-                cumulative_instances.update(activated_instances_current)
+                # Update cumulative sets
+                cumulative_instances_by_year[month_year].update(activated_instances_current)
+                cumulative_instances_all_time.update(activated_instances_current)
 
-                # Calculate monthly growth
+                # Calculate monthly growth within the calendar year
                 current_month_count = len(activated_instances_current)
+                previous_month_count = previous_month_count_by_year[month_year]
                 growth = current_month_count - previous_month_count
                 if growth > 0:
                     total_growth += growth
                     growth_months += 1
-                previous_month_count = current_month_count
+                previous_month_count_by_year[month_year] = current_month_count
 
                 # Append metrics for the month
                 monthly_data.append({
-                    'month': month_start.strftime('%Y-%m'),
-                    'activated_instances': len(cumulative_instances),  # cumulative total up to this month
+                    'month': month_str,
+                    'activated_instances': len(cumulative_instances_by_year[month_year]),  # cumulative within this year
+                    'activated_instances_all_time': len(cumulative_instances_all_time),
                     'new_instances': len(new_instances),
                     'lost_instances': len(lost_instances),
                     'max_concurrent': max_concurrent,
                     'avg_modules_per_host': avg_modules_per_host,
                     'total_hours': total_hours,
+                    'is_gap': False,
                 })
 
         # Calculate average monthly growth
@@ -239,6 +280,9 @@ def calculate_monthly_metrics(data: pd.DataFrame, start_date: pd.Timestamp = Non
             monthly_metrics['average_monthly_growth'] = total_growth / growth_months
 
         monthly_metrics['data'] = sorted(monthly_data, key=lambda x: x['month'])
+        if current_gap_start is not None:
+            gap_ranges.append({'start': current_gap_start, 'end': current_gap_end})
+        monthly_metrics['data_gaps'] = gap_ranges
         monthly_metrics['total_months'] = len(monthly_data)
 
         return monthly_metrics
