@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Callable
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -12,20 +12,64 @@ from .projections_plot import save_projection_subset_png
 from datetime import datetime
 
 
-def _eoY_rows(subset: Dict) -> List[List[str]]:
+def _summary_rows(subset: Dict, license_cap: float,
+                  fmt_int: Callable[[float], object],
+                  fmt_delta: Callable[[float], object],
+                  include_license: bool) -> List[List[object]]:
     base = subset["actual"][-1]["activated_instances"]
-    rows = [["Scenario", "EOY 2025", "EOY 2026", "+ from Current (2025)", "+ from Current (2026)"]]
+    rows: List[List[object]] = [["Current Count", fmt_int(base)]]
+    if include_license:
+        rows.insert(0, ["Current License", fmt_int(license_cap)])
+        rows.append(["Delta vs License", fmt_delta(base - license_cap)])
+    return rows
+
+
+def _eoY_rows(subset: Dict, license_cap: float,
+              make_header: Callable[[str], object],
+              fmt_text: Callable[[str], object],
+              fmt_int: Callable[[float], object],
+              fmt_delta: Callable[[float], object],
+              include_license: bool) -> List[List[object]]:
+    base = subset["actual"][-1]["activated_instances"]
+    if include_license:
+        header = [
+            make_header("Scenario"),
+            make_header("EOY 2025"),
+            make_header("Δ vs License<br/>(2025)"),
+            make_header("EOY 2026"),
+            make_header("Δ vs License<br/>(2026)"),
+        ]
+    else:
+        header = [
+            make_header("Scenario"),
+            make_header("EOY 2025"),
+            make_header("Δ vs Current<br/>(2025)"),
+            make_header("EOY 2026"),
+            make_header("Δ vs Current<br/>(2026)"),
+        ]
+
+    rows: List[List[object]] = [header]
     for key in ["linear", "decay", "avg_last3"]:
         sc = subset["scenarios"][key]
         eoy25 = sc.get("EOY_2025")
         eoy26 = sc.get("EOY_2026")
-        rows.append([
-            sc["name"],
-            f"{round(eoy25):,}" if eoy25 is not None else "—",
-            f"{round(eoy26):,}" if eoy26 is not None else "—",
-            f"{round(eoy25 - base):,}" if eoy25 is not None else "—",
-            f"{round(eoy26 - base):,}" if eoy26 is not None else "—",
-        ])
+        if include_license:
+            row: List[object] = [
+                fmt_text(sc["name"]),
+                fmt_int(eoy25) if eoy25 is not None else "—",
+                fmt_delta((eoy25 - license_cap) if eoy25 is not None else 0.0) if eoy25 is not None else "—",
+                fmt_int(eoy26) if eoy26 is not None else "—",
+                fmt_delta((eoy26 - license_cap) if eoy26 is not None else 0.0) if eoy26 is not None else "—",
+            ]
+        else:
+            row = [
+                fmt_text(sc["name"]),
+                fmt_int(eoy25) if eoy25 is not None else "—",
+                fmt_delta((eoy25 - base) if eoy25 is not None else 0.0) if eoy25 is not None else "—",
+                fmt_int(eoy26) if eoy26 is not None else "—",
+                fmt_delta((eoy26 - base) if eoy26 is not None else 0.0) if eoy26 is not None else "—",
+            ]
+        rows.append(row)
     return rows
 
 
@@ -63,12 +107,17 @@ def _most_likely_scenario(subset: Dict) -> Tuple[str, str]:
     return (best_key or "avg_last3", name)
 
 
-def _table(data: List[List[str]]) -> Table:
-    t = Table(data, hAlign='LEFT')
+def _table(data: List[List[str]], col_widths: List[float] = None) -> Table:
+    kwargs = {"hAlign": 'LEFT'}
+    if col_widths:
+        kwargs["colWidths"] = col_widths
+    t = Table(data, **kwargs)
     t.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
         ('TEXTCOLOR',(0,0),(-1,0),colors.black),
         ('ALIGN',(0,0),(-1,-1),'LEFT'),
+        ('ALIGN',(1,1),(-1,-1),'RIGHT'),
+        ('ALIGN',(0,0),(0,-1),'LEFT'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('BOTTOMPADDING', (0,0), (-1,0), 10),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
@@ -76,7 +125,12 @@ def _table(data: List[List[str]]) -> Table:
     return t
 
 
-def create_projections_pdf(projections_path: str, out_pdf: str, work_dir: str = "output") -> None:
+def create_projections_pdf(
+    projections_path: str,
+    out_pdf: str,
+    work_dir: str = "output",
+    license_cap: float = 15000.0,
+) -> None:
     with open(projections_path, "r", encoding="utf-8") as f:
         proj = json.load(f)
 
@@ -91,6 +145,46 @@ def create_projections_pdf(projections_path: str, out_pdf: str, work_dir: str = 
     h3 = styles['Heading3']
 
     story = []
+
+    header_style = ParagraphStyle(
+        'TableHeader', parent=styles['Normal'], alignment=1, fontName='Helvetica-Bold'
+    )
+    body_left_style = ParagraphStyle(
+        'TableBodyLeft', parent=styles['Normal'], alignment=0
+    )
+    body_right_style = ParagraphStyle(
+        'TableBodyRight', parent=styles['Normal'], alignment=2
+    )
+    delta_style = ParagraphStyle(
+        'TableDelta', parent=styles['Normal'], alignment=2
+    )
+
+    def make_header(text: str) -> Paragraph:
+        return Paragraph(text, header_style)
+
+    def fmt_text(text: str) -> Paragraph:
+        return Paragraph(text, body_left_style)
+
+    def fmt_int(value: float) -> Paragraph:
+        val = int(round(value))
+        return Paragraph(f'<para align="right">{val:,}</para>', body_right_style)
+
+    def fmt_delta(value: float) -> Paragraph:
+        val = int(round(value))
+        if val > 0:
+            sign = "+"
+            color = "#198754"
+        elif val < 0:
+            sign = "-"
+            color = "#dc3545"
+            val = abs(val)
+        else:
+            sign = ""
+            color = "#6c757d"
+        return Paragraph(
+            f'<para align="right"><font color="{color}"><b>{sign}{val:,}</b></font></para>',
+            delta_style,
+        )
 
     # Derive data window (e.g., Jan–Jun 2025)
     actual_series = proj.get("actual", [])
@@ -142,6 +236,7 @@ def create_projections_pdf(projections_path: str, out_pdf: str, work_dir: str = 
         story.append(Paragraph(f"Where you are now (as of {fmt_mon(last_m)}): {round(base):,} activated instances.", normal))
     else:
         story.append(Paragraph(f"Where you are now: {round(base):,} activated instances.", normal))
+    story.append(Paragraph(f"Current license assumption: {round(license_cap):,} seats. Current delta: {round(base - license_cap):,}.", normal))
     if e25 is not None:
         story.append(Paragraph(f"By end of 2025: about {round(e25):,} (roughly +{round(e25 - base):,} from today)", normal))
     if e26 is not None:
@@ -157,8 +252,18 @@ def create_projections_pdf(projections_path: str, out_pdf: str, work_dir: str = 
         save_projection_subset_png(subset, str(img_path), title)
         flow.append(Image(str(img_path), width=6.5*inch, height=3.8*inch))
         flow.append(Spacer(1, 6))
-        rows = _eoY_rows(subset)
-        flow.append(_table(rows))
+        include_license = title == "Overall"
+        summary_rows = [[make_header("Summary"), make_header("Value")]] + _summary_rows(
+            subset, license_cap, fmt_int, fmt_delta, include_license
+        )
+        flow.append(_table(summary_rows, col_widths=[130, 90]))
+        flow.append(Spacer(1, 4))
+        rows = _eoY_rows(subset, license_cap, make_header, fmt_text, fmt_int, fmt_delta, include_license)
+        if include_license:
+            col_widths = [150, 70, 90, 90, 70, 90]
+        else:
+            col_widths = [150, 80, 100, 80, 100]
+        flow.append(_table(rows, col_widths=col_widths))
         flow.append(Spacer(1, 6))
         key, name = _most_likely_scenario(subset)
         flow.append(Paragraph(f"Most likely view here: {name}", h3))
@@ -195,9 +300,10 @@ def main():
     parser.add_argument("--projections", default="output/projections.json")
     parser.add_argument("--out", default="output/growth_projections.pdf")
     parser.add_argument("--work-dir", default="output")
+    parser.add_argument("--license-cap", type=float, default=15000.0)
     args = parser.parse_args()
 
-    create_projections_pdf(args.projections, args.out, args.work_dir)
+    create_projections_pdf(args.projections, args.out, args.work_dir, args.license_cap)
     print(f"Wrote PDF to {args.out}")
 
 

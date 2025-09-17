@@ -152,10 +152,21 @@ def load_and_preprocess_data(directory: Path, start_date: Optional[pd.Timestamp]
                     first_line = f.readline()
                     if '\t' in first_line and ',' not in first_line:
                         # Tab-delimited file
-                        df = pd.read_csv(file, sep='\t', low_memory=False, encoding='utf-8-sig')
+                        df = pd.read_csv(
+                            file,
+                            sep='\t',
+                            low_memory=False,
+                            encoding='utf-8-sig',
+                            on_bad_lines='skip'
+                        )
                     else:
                         # Comma-delimited file
-                        df = pd.read_csv(file, low_memory=False, encoding='utf-8-sig')
+                        df = pd.read_csv(
+                            file,
+                            low_memory=False,
+                            encoding='utf-8-sig',
+                            on_bad_lines='skip'
+                        )
                 
                 # Check for duplicate header rows within the data
                 header_cols = df.columns.tolist()

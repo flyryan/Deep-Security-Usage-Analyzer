@@ -34,6 +34,13 @@ def _next_month(month: str) -> str:
     return f"{y:04d}-{m:02d}"
 
 
+def _value_at_series(series: List[Dict[str, float]], target_month: str) -> float:
+    for point in series:
+        if point["month"] == target_month:
+            return float(point["activated_instances"])
+    return float("nan")
+
+
 def linear_projection(x: np.ndarray, y: np.ndarray, future_steps: int) -> np.ndarray:
     coeffs = np.polyfit(x, y, 1)
     a, b = coeffs[0], coeffs[1]
@@ -114,12 +121,6 @@ def _compute_from_monthly(monthly: List[Dict], end_month: str) -> Dict:
     def to_series(pred: np.ndarray) -> List[Dict[str, float]]:
         return [{"month": forecast_months[i], "activated_instances": float(pred[i])} for i in range(len(pred))]
 
-    def value_at(series: List[Dict[str, float]], target_month: str) -> float:
-        for p in series:
-            if p["month"] == target_month:
-                return float(p["activated_instances"])
-        return float("nan")
-
     scenarios = {
         "linear": {"name": "Linear Trend", "series": to_series(lin_display)},
         "decay": {"name": "Geometric Decay (Conservative)", "series": to_series(dec_display)},
@@ -127,8 +128,8 @@ def _compute_from_monthly(monthly: List[Dict], end_month: str) -> Dict:
     }
     for _, sc in scenarios.items():
         series = sc["series"]
-        sc["EOY_2025"] = value_at(series, "2025-12")
-        sc["EOY_2026"] = value_at(series, "2026-12")
+        sc["EOY_2025"] = _value_at_series(series, "2025-12")
+        sc["EOY_2026"] = _value_at_series(series, "2026-12")
 
     gap_ranges: List[Dict[str, str]] = []
     gap_start = None
@@ -169,6 +170,97 @@ def _compute_from_monthly(monthly: List[Dict], end_month: str) -> Dict:
     }
 
 
+def _clamp_projection_to_parents(projection: Dict, parents: List[Dict]) -> None:
+    """Clamp projection scenario values so they never exceed parent projections."""
+    valid_parents = [p for p in parents if p and p.get("scenarios")]
+    if not valid_parents:
+        return
+
+    for scenario_key, scenario in projection.get("scenarios", {}).items():
+        parent_caps: Dict[str, float] = {}
+        for parent in valid_parents:
+            parent_scenario = parent.get("scenarios", {}).get(scenario_key)
+            if not parent_scenario:
+                continue
+            for entry in parent_scenario.get("series", []):
+                month = entry["month"]
+                cap = entry["activated_instances"]
+                if month not in parent_caps:
+                    parent_caps[month] = cap
+                else:
+                    parent_caps[month] = min(parent_caps[month], cap)
+
+        for entry in scenario.get("series", []):
+            cap = parent_caps.get(entry["month"])
+            if cap is not None and entry["activated_instances"] > cap:
+                entry["activated_instances"] = cap
+
+        scenario["EOY_2025"] = _value_at_series(scenario.get("series", []), "2025-12")
+        scenario["EOY_2026"] = _value_at_series(scenario.get("series", []), "2026-12")
+
+
+def _lookup_with_carry(series: List[Dict[str, float]], month: str) -> float:
+    last = 0.0
+    for point in series:
+        if point["month"] > month:
+            break
+        last = float(point["activated_instances"])
+        if point["month"] == month:
+            return last
+    return last
+
+
+def _aggregate_overall_from_clouds(overall: Dict, clouds: Dict[str, Dict]) -> None:
+    if not overall or not overall.get("actual") or not clouds:
+        return
+
+    months = [entry["month"] for entry in overall["actual"]]
+
+    # Sum actuals with carry-forward for months a cloud lacks
+    actual_totals = []
+    for month in months:
+        total = 0.0
+        for cloud in clouds.values():
+            total += _lookup_with_carry(cloud.get("actual", []), month)
+        actual_totals.append(total)
+    for entry, value in zip(overall["actual"], actual_totals):
+        entry["activated_instances"] = value
+
+    if overall.get("actual_overlay"):
+        overlay_totals = []
+        for month in months:
+            total = 0.0
+            for cloud in clouds.values():
+                total += _lookup_with_carry(cloud.get("actual_overlay", []), month)
+            overlay_totals.append(total)
+        for entry, value in zip(overall["actual_overlay"], overlay_totals):
+            entry["activated_instances"] = value
+
+    # Combine gap ranges (unique)
+    gap_set = set()
+    for cloud in clouds.values():
+        for gap in cloud.get("data_gaps", []):
+            gap_set.add((gap["start"], gap["end"]))
+    if gap_set:
+        overall["data_gaps"] = [
+            {"start": start, "end": end}
+            for start, end in sorted(gap_set)
+        ]
+
+    # Sum scenario series month-by-month
+    for scenario_key, scenario in overall.get("scenarios", {}).items():
+        series = scenario.get("series", [])
+        for entry in series:
+            month = entry["month"]
+            total = 0.0
+            for cloud in clouds.values():
+                cloud_series = cloud.get("scenarios", {}).get(scenario_key, {}).get("series", [])
+                total += _lookup_with_carry(cloud_series, month)
+            entry["activated_instances"] = total
+        scenario["EOY_2025"] = _value_at_series(series, "2025-12")
+        scenario["EOY_2026"] = _value_at_series(series, "2026-12")
+
+
 def compute_projections_from_metrics(metrics: Dict, end_month: str = "2026-12") -> Dict:
     monthly_overall = metrics.get("monthly", {}).get("data", [])
     if not monthly_overall:
@@ -183,6 +275,7 @@ def compute_projections_from_metrics(metrics: Dict, end_month: str = "2026-12") 
         cat_m = by_cat.get(cat, {}).get("monthly", {}).get("data", [])
         if cat_m:
             out_breakdowns[cat] = _compute_from_monthly(cat_m, end_month=end_month)
+            _clamp_projection_to_parents(out_breakdowns[cat], [result])
     if out_breakdowns:
         result["by_category"] = out_breakdowns
 
@@ -195,6 +288,7 @@ def compute_projections_from_metrics(metrics: Dict, end_month: str = "2026-12") 
             out_by_cp[cp] = _compute_from_monthly(cp_monthly, end_month=end_month)
     if out_by_cp:
         result["by_cloud_provider"] = out_by_cp
+        _aggregate_overall_from_clouds(result, out_by_cp)
 
     # By service category and cloud provider
     by_cat_cp = metrics.get("by_service_category_and_cloud_provider", {})
@@ -203,6 +297,14 @@ def compute_projections_from_metrics(metrics: Dict, end_month: str = "2026-12") 
         scp_monthly = scp_metrics.get("monthly", {}).get("data", [])
         if scp_monthly:
             out_by_cat_cp[key] = _compute_from_monthly(scp_monthly, end_month=end_month)
+            parents = [result]
+            if "::" in key:
+                cat_key, cp_key = key.split("::", 1)
+                if (result.get("by_category") or {}).get(cat_key):
+                    parents.append(result["by_category"][cat_key])
+                if (result.get("by_cloud_provider") or {}).get(cp_key):
+                    parents.append(result["by_cloud_provider"][cp_key])
+            _clamp_projection_to_parents(out_by_cat_cp[key], parents)
     if out_by_cat_cp:
         result["by_category_and_cloud_provider"] = out_by_cat_cp
     return result
