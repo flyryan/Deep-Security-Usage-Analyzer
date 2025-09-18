@@ -1,16 +1,43 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple, Callable
+from typing import Dict, List, Callable
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak, KeepTogether
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    Image,
+    PageBreak,
+    KeepTogether,
+    ListFlowable,
+    ListItem,
+)
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 
-from .projections_plot import save_projection_subset_png
+from .projections_plot import save_projection_subset_png, SCENARIO_LABELS
 from datetime import datetime
 
+
+BRAND_RED = colors.HexColor("#d71920")
+SLATE_900 = colors.HexColor("#111827")
+SLATE_700 = colors.HexColor("#374151")
+SLATE_500 = colors.HexColor("#6b7280")
+COOL_GREY = colors.HexColor("#f4f6fb")
+CARD_BORDER = colors.HexColor("#e5e7eb")
+TABLE_HEADER_BG = colors.HexColor("#d71920")
+TABLE_HEADER_TEXT = colors.white
+ROW_ALT_BG = colors.HexColor("#f8fafc")
+
+SCENARIO_NAMES = {
+    key: value for key, value in SCENARIO_LABELS.items()
+}
+
+SCENARIO_ORDER = ["decay", "linear", "avg_last3"]
 
 def _summary_rows(subset: Dict, license_cap: float,
                   fmt_int: Callable[[float], object],
@@ -33,29 +60,32 @@ def _eoY_rows(subset: Dict, license_cap: float,
     base = subset["actual"][-1]["activated_instances"]
     if include_license:
         header = [
-            make_header("Scenario"),
-            make_header("EOY 2025"),
-            make_header("Δ vs License<br/>(2025)"),
-            make_header("EOY 2026"),
-            make_header("Δ vs License<br/>(2026)"),
+            make_header("Forecast Model"),
+            make_header("EOY 2025 Projection"),
+            make_header("Δ vs License Cap<br/>(2025)"),
+            make_header("EOY 2026 Projection"),
+            make_header("Δ vs License Cap<br/>(2026)"),
         ]
     else:
         header = [
-            make_header("Scenario"),
-            make_header("EOY 2025"),
-            make_header("Δ vs Current<br/>(2025)"),
-            make_header("EOY 2026"),
-            make_header("Δ vs Current<br/>(2026)"),
+            make_header("Forecast Model"),
+            make_header("EOY 2025 Projection"),
+            make_header("Δ vs Current Level<br/>(2025)"),
+            make_header("EOY 2026 Projection"),
+            make_header("Δ vs Current Level<br/>(2026)"),
         ]
 
     rows: List[List[object]] = [header]
-    for key in ["linear", "decay", "avg_last3"]:
-        sc = subset["scenarios"][key]
+    for key in SCENARIO_ORDER:
+        sc = subset["scenarios"].get(key)
+        if not sc:
+            continue
+        display_name = SCENARIO_NAMES.get(key, sc.get("name", key))
         eoy25 = sc.get("EOY_2025")
         eoy26 = sc.get("EOY_2026")
         if include_license:
             row: List[object] = [
-                fmt_text(sc["name"]),
+                fmt_text(display_name),
                 fmt_int(eoy25) if eoy25 is not None else "—",
                 fmt_delta((eoy25 - license_cap) if eoy25 is not None else 0.0) if eoy25 is not None else "—",
                 fmt_int(eoy26) if eoy26 is not None else "—",
@@ -63,7 +93,7 @@ def _eoY_rows(subset: Dict, license_cap: float,
             ]
         else:
             row = [
-                fmt_text(sc["name"]),
+                fmt_text(display_name),
                 fmt_int(eoy25) if eoy25 is not None else "—",
                 fmt_delta((eoy25 - base) if eoy25 is not None else 0.0) if eoy25 is not None else "—",
                 fmt_int(eoy26) if eoy26 is not None else "—",
@@ -73,54 +103,28 @@ def _eoY_rows(subset: Dict, license_cap: float,
     return rows
 
 
-def _most_likely_scenario(subset: Dict) -> Tuple[str, str]:
-    """
-    Choose most likely scenario by matching the median of the next-3 predicted monthly adds
-    to the median of the last-3 observed monthly adds.
-    Returns (scenario_key, scenario_name).
-    """
-    actual = subset["actual"]
-    vals = [p["activated_instances"] for p in actual]
-    if len(vals) < 4:
-        # Not enough data: default to rolling average as balanced
-        sc = subset["scenarios"]["avg_last3"]
-        return ("avg_last3", sc["name"])
-    last3_adds = [vals[-3] - vals[-4], vals[-2] - vals[-3], vals[-1] - vals[-2]]
-    median_last3 = sorted(last3_adds)[1]
-    best_key = None
-    best_diff = float("inf")
-    for key in ["linear", "decay", "avg_last3"]:
-        sc = subset["scenarios"][key]
-        series = [p["activated_instances"] for p in sc["series"]]
-        if not series:
-            continue
-        # Build the first 3 predicted increments
-        first_inc = series[0] - vals[-1]
-        next_inc = (series[1] - series[0]) if len(series) > 1 else first_inc
-        third_inc = (series[2] - series[1]) if len(series) > 2 else next_inc
-        pred_med = sorted([first_inc, next_inc, third_inc])[1]
-        diff = abs(pred_med - median_last3)
-        if diff < best_diff:
-            best_diff = diff
-            best_key = key
-    name = subset["scenarios"][best_key]["name"] if best_key else "Rolling Avg Last 3 Months (Optimistic)"
-    return (best_key or "avg_last3", name)
-
-
 def _table(data: List[List[str]], col_widths: List[float] = None) -> Table:
     kwargs = {"hAlign": 'LEFT'}
     if col_widths:
         kwargs["colWidths"] = col_widths
     t = Table(data, **kwargs)
     t.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-        ('TEXTCOLOR',(0,0),(-1,0),colors.black),
-        ('ALIGN',(0,0),(-1,-1),'LEFT'),
-        ('ALIGN',(1,1),(-1,-1),'RIGHT'),
-        ('ALIGN',(0,0),(0,-1),'LEFT'),
+        ('BACKGROUND', (0,0), (-1,0), TABLE_HEADER_BG),
+        ('TEXTCOLOR',(0,0),(-1,0),TABLE_HEADER_TEXT),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0,0), (-1,0), 10),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('FONTSIZE', (0,0), (-1,0), 10),
+        ('ALIGN',(0,0),(-1,0),'LEFT'),
+        ('ALIGN',(1,1),(-1,-1),'RIGHT'),
+        ('ALIGN',(0,1),(0,-1),'LEFT'),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, ROW_ALT_BG]),
+        ('TEXTCOLOR', (0,1), (-1,-1), SLATE_900),
+        ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
+        ('LEFTPADDING', (0,0), (-1,-1), 10),
+        ('RIGHTPADDING', (0,0), (-1,-1), 10),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('BOX', (0,0), (-1,-1), 0.6, CARD_BORDER),
+        ('INNERGRID', (0,0), (-1,-1), 0.4, colors.HexColor('#f1f5f9')),
     ]))
     return t
 
@@ -137,27 +141,54 @@ def create_projections_pdf(
     out_dir = Path(work_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    doc = SimpleDocTemplate(out_pdf, pagesize=letter, rightMargin=48, leftMargin=48, topMargin=48, bottomMargin=36)
+    doc = SimpleDocTemplate(
+        out_pdf,
+        pagesize=letter,
+        rightMargin=48,
+        leftMargin=48,
+        topMargin=54,
+        bottomMargin=42,
+        title="Deep Security Growth Outlook",
+    )
     styles = getSampleStyleSheet()
-    normal = styles['Normal']
-    h1 = styles['Title']
-    h2 = styles['Heading2']
-    h3 = styles['Heading3']
+
+    base_body = ParagraphStyle(
+        'BaseBody', parent=styles['BodyText'], fontName='Helvetica', fontSize=10.5,
+        leading=14, textColor=SLATE_700, spaceAfter=4
+    )
+    normal = base_body
+    small = ParagraphStyle('Small', parent=base_body, fontSize=9, textColor=SLATE_500, spaceAfter=2)
+    h1 = ParagraphStyle('ReportTitle', parent=styles['Title'], fontName='Helvetica-Bold',
+                         fontSize=24, leading=28, textColor=SLATE_900, spaceAfter=6)
+    h2 = ParagraphStyle('SectionHeading', parent=styles['Heading2'], fontName='Helvetica-Bold',
+                         fontSize=16, leading=20, textColor=BRAND_RED, spaceBefore=14, spaceAfter=8)
+    h3 = ParagraphStyle('SubHeading', parent=styles['Heading3'], fontName='Helvetica-Bold',
+                         fontSize=12, leading=16, textColor=SLATE_900, spaceBefore=8, spaceAfter=4)
+    caption = ParagraphStyle('Caption', parent=small, fontSize=9, leading=12, textColor=SLATE_500)
+    hero_body = ParagraphStyle('HeroBody', parent=base_body, textColor=SLATE_700, spaceAfter=2)
+    hero_title = ParagraphStyle('HeroTitle', parent=h1, textColor=SLATE_900)
+    hero_meta = ParagraphStyle('HeroMeta', parent=small, alignment=2)
+    hero_body_right = ParagraphStyle('HeroBodyRight', parent=small, alignment=2, textColor=SLATE_500)
+    stat_label = ParagraphStyle('StatLabel', parent=small, alignment=1, textColor=SLATE_500)
+    stat_value = ParagraphStyle('StatValue', parent=styles['Title'], fontName='Helvetica-Bold',
+                                fontSize=17, leading=20, textColor=SLATE_900, alignment=1, spaceAfter=2)
+    stat_note = ParagraphStyle('StatNote', parent=small, alignment=1)
+    block_title_style = ParagraphStyle(
+        'BlockTitle', parent=h3, alignment=1, fontSize=13, leading=18,
+        textColor=colors.white, spaceBefore=0, spaceAfter=4
+    )
+    header_style = ParagraphStyle(
+        'TableHeader',
+        parent=small,
+        alignment=0,
+        fontName='Helvetica-Bold',
+        textColor=TABLE_HEADER_TEXT,
+    )
+    body_left_style = ParagraphStyle('TableBodyLeft', parent=base_body, alignment=0)
+    body_right_style = ParagraphStyle('TableBodyRight', parent=base_body, alignment=2)
+    delta_style = ParagraphStyle('TableDelta', parent=base_body, alignment=2, fontName='Helvetica-Bold')
 
     story = []
-
-    header_style = ParagraphStyle(
-        'TableHeader', parent=styles['Normal'], alignment=1, fontName='Helvetica-Bold'
-    )
-    body_left_style = ParagraphStyle(
-        'TableBodyLeft', parent=styles['Normal'], alignment=0
-    )
-    body_right_style = ParagraphStyle(
-        'TableBodyRight', parent=styles['Normal'], alignment=2
-    )
-    delta_style = ParagraphStyle(
-        'TableDelta', parent=styles['Normal'], alignment=2
-    )
 
     def make_header(text: str) -> Paragraph:
         return Paragraph(text, header_style)
@@ -173,18 +204,58 @@ def create_projections_pdf(
         val = int(round(value))
         if val > 0:
             sign = "+"
-            color = "#198754"
+            color = "#059669"  # Emerald
         elif val < 0:
             sign = "-"
-            color = "#dc3545"
+            color = "#dc2626"  # Red
             val = abs(val)
         else:
             sign = ""
-            color = "#6c757d"
+            color = "#6b7280"
         return Paragraph(
             f'<para align="right"><font color="{color}"><b>{sign}{val:,}</b></font></para>',
             delta_style,
         )
+
+    def format_signed(value: float) -> str:
+        val = int(round(value))
+        if val > 0:
+            return f"+{val:,}"
+        if val < 0:
+            return f"{val:,}"
+        return "0"
+
+    def delta_color(value: float) -> str:
+        if value > 0:
+            return "#dc2626"
+        if value < 0:
+            return "#059669"
+        return "#6b7280"
+
+    def stat_card(title: str, value: str, note: str = "", tone: str = "neutral") -> Table:
+        note_colors = {
+            "positive": "#0f766e",
+            "negative": "#b91c1c",
+            "neutral": "#6b7280",
+        }
+        rows: List[List[Paragraph]] = [
+            [Paragraph(title, stat_label)],
+            [Paragraph(value, stat_value)],
+        ]
+        if note:
+            color = note_colors.get(tone, note_colors["neutral"])
+            rows.append([Paragraph(f"<font color='{color}'>{note}</font>", stat_note)])
+        card = Table(rows, hAlign='LEFT')
+        card.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.white),
+            ('BOX', (0,0), (-1,-1), 0.6, CARD_BORDER),
+            ('LEFTPADDING', (0,0), (-1,-1), 10),
+            ('RIGHTPADDING', (0,0), (-1,-1), 10),
+            ('TOPPADDING', (0,0), (-1,-1), 10),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ]))
+        return card
 
     # Derive data window (e.g., Jan–Jun 2025)
     actual_series = proj.get("actual", [])
@@ -206,42 +277,177 @@ def create_projections_pdf(
             data_window = f"{fmt_mon(first_m)} to {fmt_mon(last_m)}"
 
     # Cover / Intro
-    story.append(Paragraph("Growth Outlook", h1))
-    story.append(Spacer(1, 6))
-    intro_line = "This summary projects activated instance growth using your current usage patterns."
-    story.append(Paragraph(intro_line, normal))
-    if data_window:
-        story.append(Paragraph(f"Data through {fmt_mon(last_m)} (coverage: {data_window}).", normal))
-    story.append(Spacer(1, 12))
+    intro_line = "Projected activated instance growth based on current Trend Micro usage."
+    coverage_text = ""
+    if data_window and last_m:
+        coverage_text = f"Data through {fmt_mon(last_m)}<br/>Coverage: {data_window}"
+    elif last_m:
+        coverage_text = f"Data through {fmt_mon(last_m)}"
+
+    report_date = datetime.now().strftime("%b %d, %Y")
+    hero = Table(
+        [
+            [
+                Paragraph("Deep Security Growth Outlook", hero_title),
+                Paragraph(report_date, hero_meta),
+            ],
+            [
+                Paragraph(intro_line, hero_body),
+                Paragraph(coverage_text or "&nbsp;", hero_body_right),
+            ],
+        ],
+        colWidths=[doc.width * 0.68, doc.width * 0.32],
+        hAlign='LEFT',
+    )
+    hero.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.white),
+        ('LINEABOVE', (0,0), (-1,0), 3, BRAND_RED),
+        ('BOX', (0,0), (-1,-1), 0.6, CARD_BORDER),
+        ('LEFTPADDING', (0,0), (-1,-1), 16),
+        ('RIGHTPADDING', (0,0), (-1,-1), 16),
+        ('TOPPADDING', (0,0), (-1,-1), 12),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+    ]))
+    story.append(hero)
+    story.append(Spacer(1, 16))
 
     # Methodology
     story.append(Paragraph("How We Forecast", h2))
-    story.append(Paragraph("We provide three simple, transparent views of the road ahead:", normal))
-    story.append(Paragraph("• Linear: extends the overall trend we’ve seen so far.", normal))
-    story.append(Paragraph("• Conservative: assumes monthly growth keeps slowing from recent levels.", normal))
-    story.append(Paragraph("• Optimistic: assumes the last 3 months are a good guide for the near future.", normal))
+    method_points = [
+        ListItem(Paragraph("<b>Linear Trend</b> extends the run rate observed across the full time series.", normal), bulletColor=BRAND_RED),
+        ListItem(Paragraph("<b>Geometric Decay (Most Conservative)</b> allows growth to taper month over month, following recent slowdowns.", normal), bulletColor=BRAND_RED),
+        ListItem(Paragraph("<b>Rolling Avg Last 3 Months</b> leans on the momentum from your three most recent submissions.", normal), bulletColor=BRAND_RED),
+    ]
+    story.append(ListFlowable(
+        method_points,
+        bulletType='bullet',
+        start='circle',
+        bulletFontName='Helvetica',
+        bulletFontSize=8,
+        bulletColor=BRAND_RED,
+        leftIndent=14,
+    ))
     story.append(Spacer(1, 6))
-    story.append(Paragraph("Picking a ‘Most Likely’ view: we compare each forecast to your most recent momentum and choose the one that best matches it.", normal))
-    story.append(Paragraph("Red shaded regions in the charts highlight months with no underlying data; we carry forward the prior counts so the gap is visible without inflating growth.", normal))
-    story.append(Spacer(1, 18))
+    story.append(Paragraph("Muted bands in each chart highlight where we carried forward prior counts to bridge missing submissions.", caption))
+    story.append(Spacer(1, 14))
 
     # Executive Summary (Overall)
-    overall_key, overall_name = _most_likely_scenario(proj)
-    base = proj["actual"][-1]["activated_instances"]
-    e25 = proj["scenarios"][overall_key].get("EOY_2025")
-    e26 = proj["scenarios"][overall_key].get("EOY_2026")
+    actual_points = proj.get("actual") or []
+    base = actual_points[-1]["activated_instances"] if actual_points else 0
+    scenarios = proj.get("scenarios") or {}
+
     story.append(Paragraph("What This Means", h2))
-    story.append(Paragraph(f"Most likely (overall): {overall_name}", h3))
-    if last_m:
-        story.append(Paragraph(f"Where you are now (as of {fmt_mon(last_m)}): {round(base):,} activated instances.", normal))
-    else:
-        story.append(Paragraph(f"Where you are now: {round(base):,} activated instances.", normal))
-    story.append(Paragraph(f"Current license assumption: {round(license_cap):,} seats. Current delta: {round(base - license_cap):,}.", normal))
-    if e25 is not None:
-        story.append(Paragraph(f"By end of 2025: about {round(e25):,} (roughly +{round(e25 - base):,} from today)", normal))
-    if e26 is not None:
-        story.append(Paragraph(f"By end of 2026: about {round(e26):,} (roughly +{round(e26 - base):,} from today)", normal))
-    story.append(Spacer(1, 18))
+
+    base_note = f"As of {fmt_mon(last_m)}" if last_m else "Latest submission"
+    license_delta = base - license_cap
+    cards = [
+        stat_card("Current Activated", f"{int(round(base)):,}", base_note),
+        stat_card(
+            "Δ vs License",
+            f"<font color='{delta_color(license_delta)}'><b>{format_signed(license_delta)}</b></font>",
+            f"License cap {int(round(license_cap)):,}",
+            tone='negative' if license_delta > 0 else ('positive' if license_delta < 0 else 'neutral'),
+        ),
+    ]
+
+    cards_table = Table([cards], colWidths=[doc.width / len(cards)] * len(cards), hAlign='LEFT') if cards else None
+    if cards_table:
+        cards_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ('TOPPADDING', (0,0), (-1,-1), 10),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(cards_table)
+
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph(
+        "Growth Estimate Focus",
+        h3,
+    ))
+
+    sc = scenarios.get("decay") or {}
+    eoy25 = sc.get("EOY_2025")
+    eoy26 = sc.get("EOY_2026")
+    label = SCENARIO_NAMES.get("decay", sc.get('name', 'Geometric Decay'))
+
+    def growth_color(value: float) -> str:
+        return "#059669" if value >= 0 else "#dc2626"
+
+    def license_delta_color(value: float) -> str:
+        return "#dc2626" if value > 0 else ("#059669" if value < 0 else "#6b7280")
+
+    rows: List[List[Paragraph]] = [
+        [
+            Paragraph("Horizon", header_style),
+            Paragraph("Activated Instances", header_style),
+            Paragraph("Δ vs Today", header_style),
+            Paragraph("Δ vs License Cap (15K)", header_style),
+        ]
+    ]
+
+    def add_row(label_txt: str, value: float) -> None:
+        if value is None:
+            return
+        delta_today = value - base
+        delta_license = value - license_cap
+        rows.append([
+            Paragraph(label_txt, body_left_style),
+            Paragraph(f"{int(round(value)):,}", body_right_style),
+            Paragraph(
+                f"<font color='{growth_color(delta_today)}'>{format_signed(delta_today)}</font>",
+                body_right_style,
+            ),
+            Paragraph(
+                f"<font color='{license_delta_color(delta_license)}'>{format_signed(delta_license)}</font>",
+                body_right_style,
+            ),
+        ])
+
+    add_row("EOY 2025 Projection", eoy25)
+    add_row("EOY 2026 Projection", eoy26)
+
+    title_para = Paragraph(f"<b>{label}</b>", block_title_style)
+    header_card = Table([[title_para]], colWidths=[doc.width], hAlign='LEFT')
+    header_card.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), BRAND_RED),
+        ('BOX', (0,0), (-1,-1), 0.8, BRAND_RED),
+        ('LEFTPADDING', (0,0), (-1,-1), 14),
+        ('RIGHTPADDING', (0,0), (-1,-1), 14),
+        ('TOPPADDING', (0,0), (-1,-1), 10),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+    ]))
+
+    col_widths = [doc.width * 0.30, doc.width * 0.22, doc.width * 0.24, doc.width * 0.24]
+    data_table = Table(rows, colWidths=col_widths)
+    data_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), TABLE_HEADER_BG),
+        ('TEXTCOLOR', (0,0), (-1,0), TABLE_HEADER_TEXT),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 11),
+        ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
+        ('ALIGN', (0,1), (0,-1), 'LEFT'),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, ROW_ALT_BG]),
+        ('BOX', (0,0), (-1,-1), 0.6, CARD_BORDER),
+        ('INNERGRID', (0,0), (-1,-1), 0.4, colors.HexColor('#f1f5f9')),
+        ('LEFTPADDING', (0,0), (-1,-1), 10),
+        ('RIGHTPADDING', (0,0), (-1,-1), 10),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ]))
+
+    story.append(header_card)
+    story.append(Spacer(1, 10))
+    story.append(data_table)
+    story.append(Spacer(1, 6))
+
+    if eoy26 is not None:
+        story.append(Paragraph("Use the EOY 2026 projection as the estimate for renewal sizing.", caption))
+    story.append(Spacer(1, 16))
 
     # Helper to add a section for a subset
     def add_section(title: str, subset: Dict, img_name: str, first: bool = False):
@@ -250,24 +456,24 @@ def create_projections_pdf(
         flow.append(Paragraph(title, h2))
         img_path = out_dir / img_name
         save_projection_subset_png(subset, str(img_path), title)
-        flow.append(Image(str(img_path), width=6.5*inch, height=3.8*inch))
-        flow.append(Spacer(1, 6))
+        chart_width = doc.width
+        chart_height = 3.6 * inch
+        flow.append(Image(str(img_path), width=chart_width, height=chart_height))
+        flow.append(Paragraph("Actual & Forecasted Activated Instances", caption))
+        flow.append(Spacer(1, 10))
         include_license = title == "Overall"
-        summary_rows = [[make_header("Summary"), make_header("Value")]] + _summary_rows(
+        summary_rows = [[make_header("Metric"), make_header("Activated Instances")]] + _summary_rows(
             subset, license_cap, fmt_int, fmt_delta, include_license
         )
-        flow.append(_table(summary_rows, col_widths=[130, 90]))
-        flow.append(Spacer(1, 4))
-        rows = _eoY_rows(subset, license_cap, make_header, fmt_text, fmt_int, fmt_delta, include_license)
-        if include_license:
-            col_widths = [150, 70, 90, 90, 70, 90]
-        else:
-            col_widths = [150, 80, 100, 80, 100]
-        flow.append(_table(rows, col_widths=col_widths))
+        flow.append(Paragraph("Snapshot", h3))
+        summary_widths = [doc.width * 0.45, doc.width * 0.35]
+        flow.append(_table(summary_rows, col_widths=summary_widths))
         flow.append(Spacer(1, 6))
-        key, name = _most_likely_scenario(subset)
-        flow.append(Paragraph(f"Most likely view here: {name}", h3))
-        flow.append(Paragraph("Tip: use this as the planning baseline; keep the other two as guardrails.", normal))
+        rows = _eoY_rows(subset, license_cap, make_header, fmt_text, fmt_int, fmt_delta, include_license)
+        base_widths = [0.28, 0.18, 0.18, 0.18, 0.18]
+        col_widths = [doc.width * w for w in base_widths]
+        flow.append(Paragraph("Growth Estimates", h3))
+        flow.append(_table(rows, col_widths=col_widths))
         flow.append(Spacer(1, 16))
         if not first:
             story.append(PageBreak())
@@ -291,7 +497,18 @@ def create_projections_pdf(
     for key, subset in catcp.items():
         add_section(f"Category x Cloud: {key}", subset, f"proj_{key.replace(' ', '_').replace(':','_')}.png")
 
-    doc.build(story)
+    def _draw_header_footer(canvas, doc_obj):
+        canvas.saveState()
+        top_y = doc_obj.height + doc_obj.topMargin + 6
+        canvas.setFillColor(BRAND_RED)
+        canvas.rect(doc_obj.leftMargin, top_y, doc_obj.width, 2, fill=1, stroke=0)
+        canvas.setFillColor(SLATE_500)
+        canvas.setFont("Helvetica", 9)
+        canvas.drawString(doc_obj.leftMargin, doc_obj.bottomMargin - 18, f"Prepared {report_date}")
+        canvas.drawRightString(doc_obj.leftMargin + doc_obj.width, doc_obj.bottomMargin - 18, f"Page {doc_obj.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_draw_header_footer, onLaterPages=_draw_header_footer)
 
 
 def main():
