@@ -435,6 +435,12 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
     service_categories = ["common services", "mission partners"]
     for category in service_categories:
         cat_data = data[data['final_service_category'] == category]
+
+        # Skip empty categories
+        if cat_data.empty:
+            logger.info(f"No data found for service category '{category}', skipping metrics calculation")
+            continue
+
         cat_metrics = {
             'overall': calculate_overall_metrics(cat_data),
             'by_environment': {},
@@ -467,16 +473,26 @@ def calculate_all_metrics(data: pd.DataFrame) -> Dict:
         # --- Service category splits by cloud provider and by cloud+env ---
         for cp in cloud_providers:
             cat_cp_data = data[(data['final_service_category'] == category) & (data['Cloud_Provider'] == cp)]
+
+            # Skip empty combinations
+            if cat_cp_data.empty:
+                continue
+
             key_cp = f"{category}::{cp}"
             scp_metrics = calculate_overall_metrics(cat_cp_data)
             # Add monthly metrics for service category + cloud provider
             scp_metrics['monthly'] = calculate_monthly_metrics(cat_cp_data)
             metrics['by_service_category_and_cloud_provider'][key_cp] = scp_metrics
-            
+
             cp_envs = sorted(cat_cp_data['Environment'].unique())
             for env in cp_envs:
                 key_cpe = f"{category}::{cp}::{env}"
                 cat_cp_env_data = cat_cp_data[cat_cp_data['Environment'] == env]
+
+                # Skip empty combinations
+                if cat_cp_env_data.empty:
+                    continue
+
                 scpe_metrics = calculate_overall_metrics(cat_cp_env_data)
                 # Add monthly metrics for service category + cloud provider + environment
                 scpe_metrics['monthly'] = calculate_monthly_metrics(cat_cp_env_data)
