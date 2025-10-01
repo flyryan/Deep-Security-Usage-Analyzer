@@ -298,49 +298,35 @@ def write_cost_comparison_html(comparison_data: Dict[str, Any], output_path: str
     <!-- Executive Summary - Key Metrics -->
     <div class="container">
         <div class="row">
-            <div class="col-md-4">
+            <div class="col-md-6">
                 <div class="metric-card">
                     <h4>Year 1 Savings (2026)</h4>
                     <div class="savings-highlight">{_format_currency_short(yearly['savings']['annual'][0])}</div>
                     <div class="metric-subtext">Even with upfront platform & deployment costs</div>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="metric-card">
-                    <h4>Year 2+ Annual Savings</h4>
-                    <div class="savings-highlight">{_format_currency_short(yearly['savings']['annual'][1] if len(yearly['savings']['annual']) > 1 else 0)}+</div>
-                    <div class="metric-subtext">Growing with endpoint count</div>
-                </div>
-            </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
                 <div class="metric-card">
                     <h4>{len(yearly['years'])}-Year Total Savings</h4>
                     <div class="savings-highlight">{_format_currency_short(yearly['savings']['cumulative'][-1])}</div>
-                    <div class="metric-subtext">Cumulative TCO advantage</div>
+                    <div class="metric-subtext">With projected growth to {yearly['endpoints_rounded'][-1]:,} endpoints</div>
                 </div>
             </div>
         </div>
 
         <div class="row mt-3">
-            <div class="col-md-4">
+            <div class="col-md-6">
+                <div class="metric-card">
+                    <h4>Per-Endpoint Annual Savings</h4>
+                    <div class="savings-highlight">${(yearly['deep_security']['annual_costs'][0] / yearly['endpoints'][0]) - yearly['vision_one_spc']['per_endpoint_effective'][0]:.2f}</div>
+                    <div class="metric-subtext">SPC vs Deep Security per endpoint</div>
+                </div>
+            </div>
+            <div class="col-md-6">
                 <div class="metric-card" style="border: 2px solid #d71920;">
                     <h4 style="color: #d71920;">💼 Proposed 2026 Licensing</h4>
                     <div class="metric-value" style="color: #d71920;">{proposal['endpoints']:,}</div>
                     <div class="metric-subtext"><strong>Conservative projection-based</strong> (40,891 rounded up)</div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="metric-card">
-                    <h4>Year 1 Proposal Savings</h4>
-                    <div class="savings-highlight">{_format_currency_short(proposal['savings']['year_1'])}</div>
-                    <div class="metric-subtext">SPC vs Deep Security at {proposal['endpoints']:,} endpoints</div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="metric-card">
-                    <h4>Year 2+ Proposal Savings</h4>
-                    <div class="savings-highlight">{_format_currency_short(proposal['savings']['year_2plus'])}</div>
-                    <div class="metric-subtext">Annual recurring at {proposal['endpoints']:,} endpoints</div>
                 </div>
             </div>
         </div>
@@ -353,7 +339,7 @@ def write_cost_comparison_html(comparison_data: Dict[str, Any], output_path: str
             <p class="lead">From 15K licensed to 24.7K (2025) to 41K proposed (2026)</p>
 
             <div class="highlight-box">
-                <strong>Partnership Value in 2025:</strong> Your organization grew from <strong>{baseline['licensed_endpoints']:,} licensed endpoints</strong> to <strong>{baseline['eoy_endpoints']:,} projected endpoints</strong> by EOY 2025, receiving <strong>{_format_currency(baseline['partnership_value'])}</strong> in coverage value beyond your license agreement. This flexible partnership approach supported your rapid expansion.
+                <strong>Partnership Value in 2025:</strong> Air Force Cloud One grew from <strong>{baseline['licensed_endpoints']:,} licensed endpoints</strong> to <strong>{baseline['eoy_endpoints']:,} projected endpoints</strong> by EOY 2025, receiving <strong>{_format_currency(baseline['partnership_value'])}</strong> in coverage value beyond your license agreement. This flexible partnership approach supported Cloud One's rapid expansion.
             </div>
 
             <div class="chart-container">
@@ -416,7 +402,7 @@ def write_cost_comparison_html(comparison_data: Dict[str, Any], output_path: str
                         <td><strong>VONF0247</strong></td>
                         <td>Trend Vision One - Sovereign and Private Cloud (SPC) - Software Platform (Base) per Deployment Site Federal 1+ New</td>
                         <td class="text-center">1</td>
-                        <td class="text-end">{_format_currency(proposal['vision_one_spc']['year_1_cost'] - proposal['vision_one_spc']['year_2plus_cost'] - pricing['vision_one_spc']['deployment_service']['amount'])}</td>
+                        <td class="text-end">{_format_currency(pricing['vision_one_spc']['base_platform']['amount'])}</td>
                         <td class="text-end"><strong>{_format_currency(pricing['vision_one_spc']['base_platform']['amount'])}</strong></td>
                         <td>Annual</td>
                     </tr>
@@ -424,7 +410,7 @@ def write_cost_comparison_html(comparison_data: Dict[str, Any], output_path: str
                         <td><strong>PSNF0043</strong></td>
                         <td>Trend Vision One - Sovereign and Private Cloud (SPC) - Dedicated Support Federal 1+ New</td>
                         <td class="text-center">1</td>
-                        <td class="text-end">{_format_currency(0)}</td>
+                        <td class="text-end">{_format_currency(pricing['vision_one_spc']['dedicated_support']['amount'])}</td>
                         <td class="text-end"><strong>{_format_currency(pricing['vision_one_spc']['dedicated_support']['amount'])}</strong></td>
                         <td>Annual</td>
                     </tr>
@@ -591,7 +577,7 @@ def write_cost_comparison_html(comparison_data: Dict[str, Any], output_path: str
     <div class="container">
         <div class="section">
             <h3>📊 Endpoint Growth Trajectory</h3>
-            <p>Your rapid growth makes per-endpoint savings increasingly valuable.</p>
+            <p>Air Force Cloud One's rapid growth makes per-endpoint savings increasingly valuable.</p>
 
             <div class="chart-container">
                 <img src="{_embed_image_as_base64(str(charts_dir / 'endpoint_growth_trajectory.png'))}" alt="Endpoint Growth Trajectory">
@@ -676,7 +662,7 @@ def write_cost_comparison_html(comparison_data: Dict[str, Any], output_path: str
                     <tr style="background: #f0fdf4;">
                         <td><strong>Effective Annual Cost per Endpoint</strong></td>
                         <td><strong>${pricing['deep_security']['per_endpoint']:.2f}</strong></td>
-                        <td><strong>${yearly['vision_one_spc']['per_endpoint_effective'][0]:.2f}</strong> <span class="savings-cell">(8.8% lower)</span></td>
+                        <td><strong>${yearly['vision_one_spc']['per_endpoint_effective'][0]:.2f}</strong> <span class="savings-cell">({((pricing['deep_security']['per_endpoint'] - yearly['vision_one_spc']['per_endpoint_effective'][0]) / pricing['deep_security']['per_endpoint'] * 100):.1f}% lower)</span></td>
                     </tr>
                 </tbody>
             </table>
@@ -720,7 +706,7 @@ def write_cost_comparison_html(comparison_data: Dict[str, Any], output_path: str
                 <div class="col-md-6">
                     <div class="value-card">
                         <h5>📈 Scale Efficiency Advantage</h5>
-                        <p>Your rapid 144% growth over 2 years makes SPC's better per-endpoint economics increasingly valuable. Each additional 1,000 endpoints saves $34,460 vs Deep Security. The base platform cost amortizes across more endpoints as you scale. Growth becomes an economic advantage, not a burden.</p>
+                        <p>Cloud One's rapid 144% growth over 2 years makes SPC's better per-endpoint economics increasingly valuable. Each additional 1,000 endpoints saves $34,460 vs Deep Security. The base platform cost amortizes across more endpoints as you scale. Growth becomes an economic advantage, not a burden.</p>
                     </div>
                 </div>
 

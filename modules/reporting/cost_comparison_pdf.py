@@ -105,6 +105,7 @@ def create_cost_comparison_pdf(json_path: str, output_path: str, charts_dir: str
     metadata = data.get('metadata', {})
     customer_name = metadata.get('customer_name', 'Federal Customer')
     baseline = data['baseline_2025']
+    proposal = data.get('proposal', {})
     pricing = data['pricing']
     yearly = data['yearly_comparison']
     scenarios = data['scenario_analysis']
@@ -199,13 +200,14 @@ def create_cost_comparison_pdf(json_path: str, output_path: str, charts_dir: str
     story.append(Spacer(1, 0.8 * inch))
     story.append(Paragraph("Executive Summary", heading_style))
 
+    per_endpoint_savings = (yearly['deep_security']['annual_costs'][0] / yearly['endpoints'][0]) - yearly['vision_one_spc']['per_endpoint_effective'][0]
+
     summary_data = [
         ["Metric", "Value"],
         ["Year 1 Savings (2026)", _format_currency_short(yearly['savings']['annual'][0])],
-        ["Year 2+ Annual Savings", _format_currency_short(yearly['savings']['annual'][1] if len(yearly['savings']['annual']) > 1 else 0) + "+"],
         [f"{len(yearly['years'])}-Year Total Savings", _format_currency_short(yearly['savings']['cumulative'][-1])],
-        ["Current Endpoints (Aug 2025)", f"{baseline['current_endpoints_aug']:,}"],
-        ["Projected 2026 Endpoints", f"{yearly['endpoints'][0]:,}"],
+        ["Per-Endpoint Annual Savings", f"${per_endpoint_savings:.2f}"],
+        ["Proposed 2026 Endpoints", f"{proposal['endpoints']:,}"],
         ["SPC Effective Cost/Endpoint", f"${yearly['vision_one_spc']['per_endpoint_effective'][0]:.2f}"],
         ["Deep Security Cost/Endpoint", f"${pricing['deep_security']['per_endpoint']:.2f}"],
     ]
@@ -218,10 +220,10 @@ def create_cost_comparison_pdf(json_path: str, output_path: str, charts_dir: str
     # 2025 Growth Story & 2026 Projection (combined section)
     story.append(Paragraph("2025 Growth Story & 2026 Projection", heading_style))
     story.append(Paragraph(
-        f"Your organization grew from <b>{baseline['licensed_endpoints']:,} licensed endpoints</b> to "
+        f"Air Force Cloud One grew from <b>{baseline['licensed_endpoints']:,} licensed endpoints</b> to "
         f"<b>{baseline['eoy_endpoints']:,} projected endpoints by EOY 2025</b>, receiving "
         f"<b>{_format_currency(baseline['partnership_value'])}</b> in coverage value beyond your license agreement. "
-        f"This flexible partnership approach supported your rapid expansion. "
+        f"This flexible partnership approach supported Cloud One's rapid expansion. "
         f"Based on conservative projections, we propose <b>41,000 endpoints</b> for 2026.",
         body_style
     ))

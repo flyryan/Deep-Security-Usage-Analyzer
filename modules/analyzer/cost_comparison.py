@@ -309,6 +309,24 @@ def generate_cost_comparison_data(projections_path: str, config_path: str) -> Di
     baseline_2025 = customer_context.get('baseline_2025', {})
     pricing = config['pricing']
 
+    # Calculate baseline_2025 values dynamically based on DS endpoint price
+    licensed_endpoints = baseline_2025.get('licensed_endpoints', 0)
+    eoy_endpoints = baseline_2025.get('eoy_endpoints', 0)
+    ds_per_endpoint = pricing['deep_security']['per_endpoint']
+    ds_support = pricing['deep_security']['platinum_support']['amount']
+
+    # Annual cost for licensed endpoints
+    annual_cost = (licensed_endpoints * ds_per_endpoint) + ds_support
+
+    # Partnership value = overage × per-endpoint price
+    overage_endpoints = eoy_endpoints - licensed_endpoints
+    partnership_value = overage_endpoints * ds_per_endpoint
+
+    # Update baseline_2025 with calculated values
+    baseline_2025 = dict(baseline_2025)  # Make a copy to avoid modifying config
+    baseline_2025['annual_cost'] = annual_cost
+    baseline_2025['partnership_value'] = partnership_value
+
     # Calculate proposal costs (for 41,000 endpoints)
     proposal = config.get('proposal', {})
     proposal_endpoints = proposal.get('endpoints', 41000)

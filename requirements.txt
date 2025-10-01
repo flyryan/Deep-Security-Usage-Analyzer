@@ -6,4 +6,5 @@ jinja2
 openpyxl
 xlrd
 reportlab
+weasyprint
 tqdm

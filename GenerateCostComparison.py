@@ -120,20 +120,38 @@ def run(projections_path: Path, config_path: Path, output_dir: Path) -> None:
         traceback.print_exc()
         sys.exit(1)
 
-    # Step 4: PDF generation (always run by default)
+    # Step 4: PDF generation (basic - always run by default)
     print("=" * 70)
-    print("STEP 4: Generating PDF Report")
+    print("STEP 4: Generating PDF Report (Basic)")
     print("=" * 70)
     pdf_path = output_dir / "cost_comparison.pdf"
     try:
         from modules.reporting.cost_comparison_pdf import create_cost_comparison_pdf
         create_cost_comparison_pdf(str(json_path), str(pdf_path), str(charts_dir))
-        print(f"✅ PDF report: {pdf_path}\n")
+        print(f"✅ Basic PDF report: {pdf_path}\n")
     except ImportError:
-        print("⚠️  PDF generation not available (module not implemented yet)")
+        print("⚠️  Basic PDF generation not available (module not implemented yet)")
         print("   HTML report is the primary deliverable.\n")
     except Exception as e:
-        print(f"⚠️  Warning: PDF generation failed: {e}")
+        print(f"⚠️  Warning: Basic PDF generation failed: {e}")
+        print("   HTML report is still available.\n")
+
+    # Step 5: Pretty PDF generation (HTML-styled)
+    print("=" * 70)
+    print("STEP 5: Generating Pretty PDF Report (HTML-styled)")
+    print("=" * 70)
+    pretty_pdf_path = output_dir / "cost_comparison_pretty.pdf"
+    try:
+        from modules.reporting.cost_comparison_pdf_html import write_cost_comparison_pretty_pdf
+        write_cost_comparison_pretty_pdf(comparison_data, str(charts_dir), str(pretty_pdf_path))
+        print(f"✅ Pretty PDF report: {pretty_pdf_path}\n")
+    except ImportError as e:
+        print(f"⚠️  Pretty PDF generation not available: {e}")
+        print("   Install weasyprint: pip install weasyprint\n")
+    except Exception as e:
+        print(f"⚠️  Warning: Pretty PDF generation failed: {e}")
+        import traceback
+        traceback.print_exc()
         print("   HTML report is still available.\n")
 
     # Summary
@@ -142,10 +160,11 @@ def run(projections_path: Path, config_path: Path, output_dir: Path) -> None:
     print("=" * 70 + "\n")
 
     print("📊 DELIVERABLES:")
-    print(f"   📄 HTML Report:  {html_path}")
-    print(f"   📑 PDF Report:   {pdf_path}")
-    print(f"   📈 Charts:       {charts_dir}/")
-    print(f"   📋 Data (JSON):  {json_path}")
+    print(f"   📄 HTML Report:     {html_path}")
+    print(f"   📑 Basic PDF:       {pdf_path}")
+    print(f"   ✨ Pretty PDF:      {pretty_pdf_path}")
+    print(f"   📈 Charts:          {charts_dir}/")
+    print(f"   📋 Data (JSON):     {json_path}")
 
     # Show key metrics
     yearly = comparison_data['yearly_comparison']
