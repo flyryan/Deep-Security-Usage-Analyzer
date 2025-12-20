@@ -1,0 +1,69 @@
+{
+  "common_services_selectors": [
+    "common-service-pattern-1",
+    "common-service-pattern-2"
+  ],
+  "activation_min_hours": 72,
+
+  "customer_context": {
+    "name": "Example Customer",
+    "type": "enterprise",
+    "baseline_2025": {
+      "licensed_endpoints": 10000,
+      "current_endpoints_aug": 12000,
+      "eoy_endpoints": 18000,
+      "note": "annual_cost and partnership_value are calculated dynamically based on Deep Security per-endpoint pricing"
+    }
+  },
+
+  "proposal": {
+    "endpoints": 25000,
+    "description": "Proposed licensing based on conservative projection"
+  },
+
+  "pricing": {
+    "deep_security": {
+      "per_endpoint": 0.00,
+      "platinum_support": {
+        "amount": 0.00,
+        "frequency": "annual",
+        "description": "Deep Security Platinum Support"
+      },
+      "frequency": "annual",
+      "description": "Traditional endpoint/workload security point solution"
+    },
+
+    "vision_one_spc": {
+      "base_platform": {
+        "amount": 0.00,
+        "frequency": "annual",
+        "description": "Containerized XDR platform per deployment site (annual recurring)"
+      },
+      "dedicated_support": {
+        "amount": 0.00,
+        "frequency": "annual",
+        "description": "Trend Vision One - Sovereign and Private Cloud (SPC) - Dedicated Support"
+      },
+      "deployment_service": {
+        "amount": 0.00,
+        "frequency": "one_time",
+        "waived": false,
+        "description": "Professional services for implementation (Year 1 only)"
+      },
+      "per_endpoint": {
+        "endpoint_security_pro": 0.00,
+        "crem": 0.00,
+        "edr_xdr": 0.00,
+        "total": 0.00
+      },
+      "description": "On-premises unified XDR platform with data sovereignty"
+    },
+
+    "options": {
+      "include_deployment_service": true,
+      "show_deployment_waiver_scenario": true,
+      "show_scenario_analysis": true,
+      "projection_years": 3
+    }
+  }
+}

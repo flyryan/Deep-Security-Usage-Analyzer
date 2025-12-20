@@ -1,5 +1,7 @@
 # Python
 __pycache__/
+.cache/
+.matplotlib_cache/
 *.py[cod]
 *$py.class
 *.so
@@ -43,6 +45,9 @@ venv.bak/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Configuration (use config.template.json as reference)
+config.json
 
 # Project Specific
 /output/
