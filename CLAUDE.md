@@ -4,7 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-The Trend Micro Deep Security Usage Analyzer (DSUA) is a comprehensive Python application that analyzes Trend Micro Deep Security module usage across different cloud environments. It processes usage reports, generates visualizations, and creates detailed HTML/PDF reports with interactive filtering capabilities.
+The Trend Micro Deep Security Usage Analyzer (DSUA) is a Python application designed to **aid in determining license utilization when Deep Security is deployed in closed and/or airgapped environments**.
+
+### Purpose
+
+In environments where Deep Security cannot connect to Trend Micro's cloud services (airgapped, sovereign, or restricted networks), standard license usage reporting is unavailable. DSUA fills this gap by:
+
+1. **Analyzing Security Module Usage Reports** exported from Deep Security Manager
+2. **Calculating license utilization metrics** to determine how many instances are actively using protection
+3. **Distinguishing activated vs inactive instances** using a configurable activation threshold
+4. **Supporting licensing decisions** with auditable, transparent calculations
+
+### Why Airgapped Operation Matters
+
+DSUA operates completely offline with no external API calls or network connectivity required:
+- All data processing is performed locally
+- No telemetry or usage data is transmitted externally
+- Suitable for IL4, IL5, and other restricted classification environments
+- Reports can be generated on isolated systems and shared via secure channels
 
 ## Key Commands
 
@@ -85,22 +102,102 @@ modules/
 
 ## Configuration
 
-### config.json
-```json
-{
-  "common_services_selectors": [
-    "cce-aws-isobar",
-    "gcss-common-test",
-    "gcss-common-prod",
-    "CMNSVC",
-    "CMSVC"
-  ],
-  "activation_min_hours": 24
-}
-```
+Configuration is stored in `config.json` (gitignored). Copy `config.template.json` to `config.json` and customize for your environment.
 
-- `common_services_selectors`: Patterns to identify "common services" vs "mission partners" based on Computer Group
-- `activation_min_hours`: Minimum cumulative online hours for an instance to be considered "activated"
+### Core Configuration Parameters
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `common_services_selectors` | Array of patterns (case-insensitive) to match against Computer Group for categorizing instances as "Common Services" vs "Mission Partners" | `["shared-infra", "common-svc"]` |
+| `activation_min_hours` | Minimum cumulative online hours with ANY security module enabled for an instance to be counted as "activated" | `72` |
+
+### Activation Threshold (Critical for Licensing)
+
+The `activation_min_hours` parameter is fundamental to license utilization calculations:
+
+- **What it does**: Filters out transient, test, or briefly-online instances from activated counts
+- **Why it matters**: Prevents inflating license counts with instances that were only briefly protected
+- **How to set it**: Should align with your licensing contract terms (e.g., 24, 72, or 168 hours)
+- **Calculation**: Cumulative time across all records where the instance had at least one security module enabled
+
+**Example**: With `activation_min_hours: 72`, an instance must have been online with protection for a total of 72+ hours during the analysis period to count as "activated" for licensing purposes.
+
+## Input Data Requirements
+
+DSUA processes **Deep Security Security Module Usage Reports** exported from Deep Security Manager.
+
+### Supported File Formats
+- CSV (tab or comma delimited, auto-detected)
+- Excel (.xlsx, .xls)
+
+### Required Columns
+
+| Column | Description |
+|--------|-------------|
+| `Hostname` | Unique identifier for the protected instance |
+| `Start Date` | Date when the usage period began |
+| `Start Time` | Time when the usage period began |
+| `Stop Date` | Date when the usage period ended |
+| `Stop Time` | Time when the usage period ended |
+| `Duration (Seconds)` | Total seconds in the usage period |
+
+### Security Module Columns (Binary 0/1)
+
+| Column | Module Name |
+|--------|-------------|
+| `AM` | Anti-Malware |
+| `WRS` | Web Reputation Service |
+| `DC` | Device Control |
+| `AC` | Application Control |
+| `IM` | Integrity Monitoring |
+| `LI` | Log Inspection |
+| `FW` | Firewall |
+| `DPI` | Deep Packet Inspection |
+| `SAP` | Suspicious Activity Prevention |
+
+### Optional Columns
+
+| Column | Description |
+|--------|-------------|
+| `Computer Group` | Used for service category classification |
+| `Cloud Account` | Cloud provider account identifier |
+| `Source_Cloud_Provider` | Explicit cloud provider (AWS, Azure, GCP, OCI) |
+
+### Data Preprocessing
+
+During loading, DSUA automatically:
+1. Adds missing module columns (set to 0)
+2. Converts non-binary module values to 0 (logged as warnings)
+3. Fills NaN values appropriately
+4. Detects and removes duplicate header rows
+5. Adds derived columns: `has_modules`, `service_category`, `cloud_provider`
+
+## Licensing Decision Support
+
+DSUA provides metrics specifically designed to support licensing decisions:
+
+### Key Metrics for Licensing
+
+| Metric | Description | Licensing Relevance |
+|--------|-------------|---------------------|
+| **Activated Instances** | Instances with cumulative online time ≥ activation threshold AND at least one module enabled | Primary count for license true-up |
+| **Inactive Instances** | Total instances minus activated instances | Potential license optimization opportunity |
+| **Max Concurrent** | Peak simultaneous instances at any point in time | May affect burst licensing or capacity planning |
+| **Activated Hours** | Total hours of protection across all activated instances | Validates sustained usage |
+
+### How Metrics Are Calculated
+
+1. **Total Instances**: Count of unique hostnames in the dataset
+2. **Activated Instances**: Unique hostnames where `SUM(Duration)` for records with `has_modules=True` ≥ `activation_min_hours * 3600`
+3. **Concurrent Usage**: Timeline algorithm that tracks +1 at each start time and -1 at each stop time, returning the maximum concurrent count
+
+### Audit Trail
+
+All calculations are logged to `security_analysis.log` with:
+- Data quality warnings (invalid values corrected)
+- Preprocessing steps applied
+- Metric calculation results
+- Any exceptions or errors encountered
 
 ## Important Patterns & Conventions
 
@@ -122,12 +219,6 @@ The `interactive_report_template.html` is critical - it implements:
 - Dynamic filtering by environment, module, cloud provider, and service category
 - Correct data source selection based on active filters
 - Real-time chart and metric updates without page reload
-
-## Recent Critical Fixes (Completed)
-
-1. **Cloud Provider + Service Category Filtering**: Fixed filtering logic to use correct metric splits
-2. **Growth Chart Data Consistency**: Fixed cumulative calculation to match overall statistics
-3. **Environment Distribution Charts**: Fixed chart rendering for filtered views
 
 ## Working with the Codebase
 

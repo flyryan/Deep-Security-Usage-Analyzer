@@ -1,21 +1,169 @@
 # Trend Micro Deep Security Usage Analyzer (DSUA)
 
-The Trend Micro Deep Security Usage Analyzer (DSUA) is a comprehensive tool designed to analyze module usage across different environments within Trend Micro's Deep Security. It processes usage data, deduplicates files and entries for efficiency, and generates detailed reports and visualizations to provide insights into module utilization.
+The Trend Micro Deep Security Usage Analyzer (DSUA) is designed to **aid in determining license utilization when Deep Security is deployed in closed and/or airgapped environments**.
+
+## Purpose
+
+In airgapped, sovereign, or restricted network environments where Deep Security cannot connect to Trend Micro's cloud services, standard license usage reporting is unavailable. DSUA fills this gap by processing exported Security Module Usage Reports and generating auditable metrics for licensing decisions.
+
+### Key Capabilities
+
+- **License Utilization Analysis**: Determine how many instances are actively using Deep Security protection
+- **Activation Threshold Filtering**: Distinguish genuinely active instances from transient or test deployments
+- **Multi-Environment Support**: Analyze usage across AWS, Azure, GCP, OCI, and on-premises environments
+- **Auditable Calculations**: Transparent metrics with full logging for license compliance verification
+
+### Offline Operation
+
+DSUA operates completely offline:
+- No internet connectivity required
+- No external API calls or telemetry
+- All data processed locally
+- Suitable for IL4, IL5, C1D, and other restricted classification environments
 
 ## Table of Contents
 
-- [Overview](#overview)
+- [Use Cases](#use-cases)
+- [Activation Threshold](#activation-threshold)
+- [Input Data Requirements](#input-data-requirements)
+- [Configuration](#configuration)
 - [Prerequisites](#prerequisites)
 - [Project Structure](#project-structure)
-- [Deduplication Process](#deduplication-process)
 - [Usage](#usage)
 - [Workflow](#workflow)
 - [Output](#output)
+- [Glossary](#glossary)
 - [Contributing](#contributing)
 
-## Overview
+## Use Cases
 
-DSUA provides a clear understanding of module usage patterns by analyzing data exported from Deep Security. It handles large datasets by deduplicating files and entries, ensuring accurate and efficient analysis. The tool generates comprehensive reports including metrics summaries, visualizations, and detailed HTML and PDF reports with embedded visualizations.
+### License Optimization
+Identify the difference between **total instances** (all hostnames in usage reports) and **activated instances** (those meeting the activation threshold). The gap represents potential license optimization opportunities.
+
+### Contract Compliance
+Verify that instance counts align with licensing contract terms by using the configurable activation threshold to match your contract's definition of "active" protection.
+
+### Capacity Planning
+Analyze **maximum concurrent usage** to understand peak protection demand, useful for capacity planning and burst licensing scenarios.
+
+### Growth Trending
+Track month-over-month changes in activated instances to forecast future licensing needs.
+
+## Activation Threshold
+
+The activation threshold is the most critical configuration parameter for licensing decisions.
+
+### What It Is
+
+The `activation_min_hours` setting defines the **minimum cumulative online hours** an instance must have (with at least one security module enabled) to be counted as "activated" for licensing purposes.
+
+### Why It Matters
+
+Without a threshold, every instance that appeared briefly in usage reports would count toward licensing—including:
+- Test instances spun up for minutes
+- Instances that had Deep Security agent installed but never configured
+- Decommissioned instances with residual activity
+
+The activation threshold ensures only genuinely protected instances count toward license utilization.
+
+### How It Works
+
+1. DSUA sums all `Duration (Seconds)` for each unique hostname where at least one security module was enabled
+2. If this cumulative time ≥ `activation_min_hours × 3600`, the instance is "activated"
+3. All metrics, reports, and visualizations reflect this filtered count
+
+### Setting the Threshold
+
+Configure in `config.json`:
+```json
+{
+  "activation_min_hours": 72
+}
+```
+
+**Recommended values:**
+- `24` - Minimum for catching short-lived instances
+- `72` - Balanced threshold for most deployments (3 days cumulative)
+- `168` - Strict threshold (1 week cumulative)
+
+The value should align with your licensing contract terms for what constitutes "active" protection.
+
+## Input Data Requirements
+
+### Data Source
+
+Export **Security Module Usage Reports** from Deep Security Manager. These reports contain time-series records of when security modules were active on each protected instance.
+
+### Supported File Formats
+
+| Format | Notes |
+|--------|-------|
+| CSV | Tab or comma delimited (auto-detected) |
+| Excel | .xlsx and .xls formats supported |
+
+### Required Columns
+
+| Column | Description |
+|--------|-------------|
+| `Hostname` | Unique identifier for the protected instance |
+| `Start Date` | Date when the usage period began |
+| `Start Time` | Time when the usage period began |
+| `Stop Date` | Date when the usage period ended |
+| `Stop Time` | Time when the usage period ended |
+| `Duration (Seconds)` | Total seconds in the usage period |
+
+### Security Module Columns
+
+Each module is represented as a binary column (0 = disabled, 1 = enabled):
+
+| Column | Module |
+|--------|--------|
+| `AM` | Anti-Malware |
+| `WRS` | Web Reputation Service |
+| `DC` | Device Control |
+| `AC` | Application Control |
+| `IM` | Integrity Monitoring |
+| `LI` | Log Inspection |
+| `FW` | Firewall |
+| `DPI` | Deep Packet Inspection |
+| `SAP` | Suspicious Activity Prevention |
+
+### Optional Columns
+
+| Column | Purpose |
+|--------|---------|
+| `Computer Group` | Used for service category classification |
+| `Cloud Account` | Cloud provider account identifier |
+| `Source_Cloud_Provider` | Explicit cloud provider (AWS, Azure, GCP, OCI) |
+
+### Data Preprocessing
+
+DSUA automatically handles common data quality issues:
+- Missing module columns are added (set to 0)
+- Non-binary module values are corrected to 0 (logged as warnings)
+- Duplicate header rows are detected and removed
+- NaN values are filled appropriately
+
+## Configuration
+
+Copy `config.template.json` to `config.json` and customize for your environment.
+
+### Core Parameters
+
+```json
+{
+  "common_services_selectors": [
+    "shared-infra-pattern",
+    "common-services-pattern"
+  ],
+  "activation_min_hours": 72
+}
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `common_services_selectors` | Array of patterns (case-insensitive) to match against `Computer Group` for categorizing instances as "Common Services" vs "Mission Partners" |
+| `activation_min_hours` | Minimum cumulative online hours for an instance to count as "activated" (see [Activation Threshold](#activation-threshold)) |
 
 ## Prerequisites
 
@@ -267,7 +415,22 @@ The deduplication process ensures accuracy and efficiency:
   - Concurrent usage analysis
 - `module_usage.png`: Module usage visualization
 - `environment_distribution.png`: Environment distribution chart
-- `security_analysis.log`: Detailed execution log
+- `security_analysis.log`: Detailed execution log (includes data quality warnings and calculation audit trail)
+
+## Glossary
+
+Key terms used in DSUA reports and metrics:
+
+| Term | Definition |
+|------|------------|
+| **Total Instances** | Count of all unique hostnames appearing in the usage data |
+| **Activated Instances** | Instances with cumulative online time ≥ activation threshold AND at least one security module enabled |
+| **Inactive Instances** | Total instances minus activated instances; may represent optimization opportunities |
+| **Activated Hours** | Sum of all duration where the instance had at least one module enabled |
+| **Max Concurrent** | Peak number of instances simultaneously active at any point in the analysis period |
+| **Service Category** | Classification as "Common Services" (shared infrastructure) or "Mission Partners" (application-specific) based on Computer Group patterns |
+| **Cloud Provider** | Detected cloud platform (AWS, Azure, GCP, OCI) based on hostname patterns, filenames, or explicit column |
+| **Environment** | Detected deployment stage (Production, Development, Test, Staging, etc.) based on hostname patterns |
 
 ## Contributing
 
